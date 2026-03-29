@@ -1,5 +1,5 @@
 # Minimal runtime config
-model: gpt-5.4-mini
+model: gpt-5-mini
 timeout: 60
 max_retries: 2
 idle_wait_extra_seconds: 5
