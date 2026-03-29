@@ -1,0 +1,39 @@
+# Track only the main Copilot project files.
+# Everything else is ignored by default.
+*
+
+# Keep repo metadata and this ignore file.
+!.gitignore
+!.github/
+!.github/**
+
+# Keep main project source/docs.
+!backend.py
+!hello.py
+!config.yaml
+!research-report.md
+
+# Keep project scripts if needed for running/building.
+!scripts/
+!scripts/**
+
+# Keep optional project docs if added later.
+!README.md
+
+# Explicitly ignore local/sensitive/generated artifacts.
+.env
+.venv/
+.venv_oi/
+.oi-venv/
+oi-smoke-workspace/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite
+*.sqlite3
+*.zip
+
+# Ignore external vendored repository.
+open-interpreter/

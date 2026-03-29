@@ -1,0 +1,24 @@
+# Minimal runtime config
+model: gpt-5.4-mini
+timeout: 60
+max_retries: 2
+idle_wait_extra_seconds: 5
+streaming_enabled: true
+
+# Chat flow
+initial_prompt: ""
+user_prompt_text: "\nYou: "
+chat_start_message: "Copilot chat started. Type 'exit' to quit."
+goodbye_message: "Goodbye."
+assistant_prefix: "Copilot says: "
+exit_commands: [exit, quit, q]
+
+# Permission policy
+auto_approve_read_only: true
+auto_approve_tools: [read, search]
+dangerous_command_tokens: ["rm -rf", "sudo ", "curl |", "wget |"]
+permission_prompt_enabled: true
+permission_prompt_text: "Approve this action? [y/N]: "
+approval_yes_values: [y, yes]
+permission_block_message: "Blocked by local safety policy."
+permission_deny_message: "Denied by interactive policy."
