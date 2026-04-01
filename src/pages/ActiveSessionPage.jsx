@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
+  abortTurn,
   connectEvents,
   getSession,
   sendApproval,
   sendPrompt,
   sendUserInput,
 } from "../api";
+import { createInitialState, processEvent } from "../lib/blockBuilder";
+import MessageList from "../components/chat/MessageList";
+import ChatInput from "../components/chat/ChatInput";
+import PermissionCard from "../components/tools/PermissionCard";
 
 // ── Sidebar nav items ────────────────────────────────────
 const sidebarItems = [
@@ -17,10 +22,6 @@ const sidebarItems = [
 ];
 
 // ── Helpers ──────────────────────────────────────────────
-function scrollToBottom(el) {
-  if (el) el.scrollTop = el.scrollHeight;
-}
-
 function trimStatusText(value, max = 120) {
   if (!value) return "";
   const text = String(value).trim().replace(/\s+/g, " ");
@@ -102,7 +103,7 @@ export default function ActiveSessionPage() {
   const sessionId = searchParams.get("id");
 
   // Chat state
-  const [messages, setMessages] = useState([]); // { role, content, id }
+  const [msgState, setMsgState] = useState(createInitialState);
   const [inputText, setInputText] = useState("");
   const [busy, setBusy] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -128,35 +129,10 @@ export default function ActiveSessionPage() {
   // Pending approval / input requests
   const [pendingRequests, setPendingRequests] = useState([]); // { request_id, kind, payload }
 
-  const chatRef = useRef(null);
   const wsRef = useRef(null);
-  const streamingRef = useRef(null); // msg id currently being streamed
 
   useEffect(() => {
     document.title = "Cloud Cowork Active Session";
-  }, []);
-
-  // ── Append / update messages helpers ───────────────────
-  const pushMessage = useCallback((msg) => {
-    setMessages((prev) => [...prev, msg]);
-  }, []);
-
-  const updateStreamingMessage = useCallback((msgId, delta) => {
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.id === msgId ? { ...m, content: m.content + delta } : m
-      )
-    );
-  }, []);
-
-  const finaliseStreamingMessage = useCallback((content) => {
-    if (!streamingRef.current) return;
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.id === streamingRef.current ? { ...m, content } : m
-      )
-    );
-    streamingRef.current = null;
   }, []);
 
   // ── Extract artifacts / folders from tool events ───────
@@ -243,7 +219,7 @@ export default function ActiveSessionPage() {
   }, []);
 
   const resetSessionState = useCallback(() => {
-    setMessages([]);
+    setMsgState(createInitialState());
     setInputText("");
     setBusy(false);
     setConnected(false);
@@ -258,7 +234,6 @@ export default function ActiveSessionPage() {
     setStatusText("Connecting to session");
     setStatusTone("ready");
     setActivityLog([]);
-    streamingRef.current = null;
   }, []);
 
   // ── WebSocket connection ───────────────────────────────
@@ -342,12 +317,8 @@ export default function ActiveSessionPage() {
           setStatusTone("working");
           setStatusText(summariseEvent(type, data));
           appendActivity(type, data, "working");
+          setMsgState((prev) => processEvent(prev, type, data));
           if (data?.prompt) {
-            pushMessage({
-              role: "user",
-              content: data.prompt,
-              id: `u-\${Date.now()}`,
-            });
             setQueryCount((c) => c + 1);
           }
           break;
@@ -355,20 +326,7 @@ export default function ActiveSessionPage() {
         case "assistant_delta": {
           setStatusTone("working");
           setStatusText("Writing response");
-          if (!streamingRef.current) {
-            const msgId = `a-\${Date.now()}`;
-            streamingRef.current = msgId;
-            pushMessage({
-              role: "assistant",
-              content: data.content || "",
-              id: msgId,
-            });
-          } else {
-            updateStreamingMessage(
-              streamingRef.current,
-              data.content || ""
-            );
-          }
+          setMsgState((prev) => processEvent(prev, type, data));
           break;
         }
 
@@ -377,15 +335,7 @@ export default function ActiveSessionPage() {
             setStatusTone("ready");
             setStatusText("Response received");
             appendActivity(type, data);
-            if (streamingRef.current) {
-              finaliseStreamingMessage(data.content);
-            } else {
-              pushMessage({
-                role: "assistant",
-                content: data.content,
-                id: `a-\${Date.now()}`,
-              });
-            }
+            setMsgState((prev) => processEvent(prev, type, data));
           }
           break;
 
@@ -397,18 +347,21 @@ export default function ActiveSessionPage() {
             ...prev,
             { id: data.tool_call_id, name: data.tool_name },
           ]);
+          setMsgState((prev) => processEvent(prev, type, data));
           break;
 
         case "tool_output":
           setStatusTone("working");
           setStatusText(summariseEvent(type, data));
           appendActivity(type, data, "working");
+          setMsgState((prev) => processEvent(prev, type, data));
           break;
 
         case "tool_progress":
           setStatusTone("working");
           setStatusText(summariseEvent(type, data));
           appendActivity(type, data, "working");
+          setMsgState((prev) => processEvent(prev, type, data));
           break;
 
         case "tool_complete":
@@ -423,6 +376,7 @@ export default function ActiveSessionPage() {
             prev.filter((t) => t.id !== data.tool_call_id)
           );
           processToolComplete(data);
+          setMsgState((prev) => processEvent(prev, type, data));
           break;
 
         case "permission_requested":
@@ -476,7 +430,7 @@ export default function ActiveSessionPage() {
 
         case "turn_complete":
           setBusy(false);
-          streamingRef.current = null;
+          setMsgState((prev) => processEvent(prev, type, data));
           if (data?.error) {
             setLastTurnError(data.error);
             setError(data.error);
@@ -512,32 +466,11 @@ export default function ActiveSessionPage() {
     enqueuePendingRequest,
     resetSessionState,
     sessionId,
-    pushMessage,
-    updateStreamingMessage,
-    finaliseStreamingMessage,
     processToolComplete,
     appendActivity,
   ]);
 
-  // Auto-scroll on new messages
-  useEffect(() => {
-    scrollToBottom(chatRef.current);
-  }, [messages]);
-
   // ── Handlers ───────────────────────────────────────────
-  const handleSend = async (e) => {
-    e.preventDefault();
-    if (!inputText.trim() || busy || !sessionId) return;
-    const text = inputText.trim();
-    setInputText("");
-    try {
-      await sendPrompt(sessionId, text);
-    } catch (err) {
-      setError("Failed to send prompt");
-      console.error(err);
-    }
-  };
-
   const handleApproval = async (requestId, approved) => {
     try {
       await sendApproval(sessionId, requestId, approved);
@@ -667,7 +600,7 @@ export default function ActiveSessionPage() {
               {/* Connection indicator */}
               <div className="flex items-center gap-2 text-xs text-secondary">
                 <span
-                  className={`h-2 w-2 rounded-full \${
+                  className={`h-2 w-2 rounded-full ${
                     connected ? "bg-green-500" : "bg-red-400"
                   }`}
                 />
@@ -686,169 +619,67 @@ export default function ActiveSessionPage() {
           <section className="flex flex-1 overflow-hidden">
             {/* ── Chat area ────────────────────────────── */}
             <div className="relative flex flex-1 flex-col border-r border-outline-variant/10 bg-surface">
-              <div
-                ref={chatRef}
-                className="custom-scrollbar flex-1 space-y-6 overflow-y-auto p-8"
-              >
-                <div className={`rounded-[1rem] border p-4 \${toneClasses.card}`}>
+              {/* Status card */}
+              <div className="p-4">
+                <div className={`rounded-[1rem] border p-4 ${toneClasses.card}`}>
                   <div className="flex flex-wrap items-center gap-2">
                     <RuntimeBadge label="Engine" value={sessionMeta.engine} />
                     <RuntimeBadge label="Model" value={sessionMeta.model} />
                     <RuntimeBadge label="Provider" value={sessionMeta.provider} />
-                    <RuntimeBadge
-                      label="Approvals"
-                      value={sessionMeta.approval_mode}
-                    />
+                    <RuntimeBadge label="Approvals" value={sessionMeta.approval_mode} />
                   </div>
-                  <div className={`mt-3 flex items-center gap-2 text-sm \${toneClasses.text}`}>
-                    <span className={`h-2.5 w-2.5 rounded-full \${toneClasses.dot}`} />
+                  <div className={`mt-3 flex items-center gap-2 text-sm ${toneClasses.text}`}>
+                    <span className={`h-2.5 w-2.5 rounded-full ${toneClasses.dot}`} />
                     <span>{statusText}</span>
                   </div>
                   {lastTurnError && (
                     <p className="mt-2 text-sm text-red-700">{lastTurnError}</p>
                   )}
                 </div>
-
-                {messages.length === 0 && !busy && (
-                  <div className="flex h-full items-center justify-center text-secondary/50">
-                    <p className="font-newsreader text-lg italic">
-                      Waiting for the first message…
-                    </p>
-                  </div>
-                )}
-
-                {messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex \${
-                      msg.role === "user" ? "justify-end" : "justify-start gap-4"
-                    }`}
-                  >
-                    {msg.role === "assistant" && (
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary text-on-secondary">
-                        <span className="material-symbols-outlined text-xs">
-                          auto_awesome
-                        </span>
-                      </div>
-                    )}
-                    <div
-                      className={
-                        msg.role === "user"
-                          ? "max-w-[80%] rounded-[1rem] bg-surface-container-high p-6 shadow-sm"
-                          : "max-w-[85%] rounded-[1rem] border border-outline-variant/20 bg-surface-container-lowest p-6"
-                      }
-                    >
-                      <p className="font-newsreader text-lg leading-relaxed text-on-surface whitespace-pre-wrap">
-                        {msg.content}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-
-                {/* Streaming / busy indicator */}
-                {busy && !streamingRef.current && messages.length > 0 && (
-                  <div className="flex justify-start gap-4">
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary text-on-secondary">
-                      <span className="material-symbols-outlined text-xs">
-                        auto_awesome
-                      </span>
-                    </div>
-                    <div className="inline-flex items-center gap-2 rounded-full bg-secondary-container px-4 py-2 text-xs font-label text-on-secondary-container">
-                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
-                      {activeTools.length > 0
-                        ? `Running \${activeTools.map((t) => t.name).join(", ")}…`
-                        : "Thinking…"}
-                    </div>
-                  </div>
-                )}
-
-                {/* Active tool indicators */}
-                {activeTools.length > 0 && (
-                  <div className="flex flex-wrap gap-2 pl-12">
-                    {activeTools.map((tool) => (
-                      <div
-                        key={tool.id}
-                        className="inline-flex items-center gap-2 rounded-full bg-tertiary-fixed/30 px-3 py-1 text-xs"
-                      >
-                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-tertiary" />
-                        <span className="font-label text-on-tertiary-fixed">
-                          {tool.name}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Pending approval / input requests */}
-                {pendingRequests.map((req) => (
-                  <div
-                    key={req.request_id}
-                    className="mx-auto max-w-lg rounded-[1rem] border-2 border-primary/30 bg-primary-container/20 p-6"
-                  >
-                    {req.kind === "permission" ? (
-                      <PermissionBanner
-                        req={req}
-                        onApprove={() =>
-                          handleApproval(req.request_id, true)
-                        }
-                        onDeny={() =>
-                          handleApproval(req.request_id, false)
-                        }
-                      />
-                    ) : (
-                      <UserInputBanner
-                        req={req}
-                        onSubmit={(answer) =>
-                          handleUserInput(req.request_id, answer)
-                        }
-                      />
-                    )}
-                  </div>
-                ))}
-
-                {/* Error toast */}
-                {error && (
-                  <div className="mx-auto max-w-md rounded-[1rem] border border-red-300 bg-red-50 p-4 text-center text-sm text-red-700">
-                    {error}
-                  </div>
-                )}
               </div>
 
-              {/* Chat input */}
-              <div className="bg-background p-6">
-                <form
-                  onSubmit={handleSend}
-                  className="mx-auto flex max-w-4xl items-center gap-3 rounded-full bg-surface-container-highest p-2 shadow-inner"
-                >
-                  <button
-                    type="button"
-                    className="p-3 text-secondary transition-colors hover:text-primary"
-                  >
-                    <span className="material-symbols-outlined">
-                      attach_file
-                    </span>
-                  </button>
-                  <input
-                    type="text"
-                    value={inputText}
-                    onChange={(e) => setInputText(e.target.value)}
-                    placeholder={
-                      busy
-                        ? "Agent is working…"
-                        : "Type a command or inquiry..."
-                    }
-                    disabled={busy}
-                    className="flex-1 border-none bg-transparent px-2 text-base font-body text-on-surface focus:ring-0 disabled:opacity-50"
-                  />
-                  <button
-                    type="submit"
-                    disabled={busy || !inputText.trim()}
-                    className="rounded-full bg-primary p-3 text-on-primary transition-transform hover:scale-95 disabled:opacity-40"
-                  >
-                    <span className="material-symbols-outlined">send</span>
-                  </button>
-                </form>
-              </div>
+              {/* Error toast */}
+              {error && (
+                <div className="mx-8 mb-2 rounded-[1rem] border border-red-300 bg-red-50 p-4 text-center text-sm text-red-700">
+                  {error}
+                </div>
+              )}
+
+              <MessageList
+                messages={msgState.messages}
+                isTyping={busy && !msgState.streamingMsgId}
+                pendingRequests={pendingRequests}
+                renderPendingRequest={(req) => {
+                  if (req.kind === "permission") {
+                    return (
+                      <PermissionCard
+                        key={req.request_id}
+                        request={req}
+                        onApprove={(id) => handleApproval(id, true)}
+                        onDeny={(id) => handleApproval(id, false)}
+                      />
+                    );
+                  }
+                  return (
+                    <UserInputBanner
+                      key={req.request_id}
+                      req={req}
+                      onSubmit={(answer) => handleUserInput(req.request_id, answer)}
+                    />
+                  );
+                }}
+              />
+              <ChatInput
+                value={inputText}
+                onChange={setInputText}
+                onSend={(text) => {
+                  sendPrompt(sessionId, text);
+                  setInputText("");
+                }}
+                onAbort={() => abortTurn(sessionId)}
+                disabled={busy}
+                isBusy={busy}
+              />
             </div>
 
             {/* ── Right sidebar ────────────────────────── */}
@@ -880,9 +711,9 @@ export default function ActiveSessionPage() {
                   <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-secondary">
                     Run Status
                   </h3>
-                  <div className={`rounded-[1rem] border p-4 \${toneClasses.card}`}>
-                    <div className={`flex items-center gap-2 text-sm font-medium \${toneClasses.text}`}>
-                      <span className={`h-2.5 w-2.5 rounded-full \${toneClasses.dot}`} />
+                  <div className={`rounded-[1rem] border p-4 ${toneClasses.card}`}>
+                    <div className={`flex items-center gap-2 text-sm font-medium ${toneClasses.text}`}>
+                      <span className={`h-2.5 w-2.5 rounded-full ${toneClasses.dot}`} />
                       <span>{statusText}</span>
                     </div>
                     {lastTurnError && (
@@ -1059,7 +890,7 @@ export default function ActiveSessionPage() {
           </span>
         </a>
         <Link
-          to={`/session?id=\${sessionId}`}
+          to={`/session?id=${sessionId}`}
           className="-translate-y-4 scale-110 rounded-full bg-primary p-4 text-background shadow-lg shadow-primary/20"
         >
           <span className="material-symbols-outlined">monitoring</span>
@@ -1096,46 +927,6 @@ function RuntimeRow({ label, value }) {
 }
 
 // ── Sub-components ───────────────────────────────────────
-
-function PermissionBanner({ req, onApprove, onDeny }) {
-  const { payload } = req;
-  return (
-    <div className="space-y-4 text-center">
-      <div className="flex items-center justify-center gap-2 text-primary">
-        <span className="material-symbols-outlined">shield</span>
-        <span className="font-label text-sm font-bold uppercase tracking-wide">
-          Permission Required
-        </span>
-      </div>
-      <p className="font-newsreader text-base text-on-surface">
-        <span className="font-semibold">{payload.tool_name}</span>
-        {payload.full_command_text && (
-          <>
-            {" "}
-            wants to run:
-            <code className="mt-2 block rounded bg-surface-container-highest p-3 text-left text-xs">
-              {payload.full_command_text}
-            </code>
-          </>
-        )}
-      </p>
-      <div className="flex items-center justify-center gap-4">
-        <button
-          onClick={onDeny}
-          className="rounded-full border border-outline-variant px-6 py-2 font-label text-sm font-bold text-secondary transition-colors hover:bg-surface-container-high"
-        >
-          Deny
-        </button>
-        <button
-          onClick={onApprove}
-          className="rounded-full bg-primary px-6 py-2 font-label text-sm font-bold text-on-primary transition-opacity hover:opacity-90"
-        >
-          Approve
-        </button>
-      </div>
-    </div>
-  );
-}
 
 function UserInputBanner({ req, onSubmit }) {
   const [answer, setAnswer] = useState("");
