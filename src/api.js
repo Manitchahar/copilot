@@ -41,8 +41,11 @@ export const getSession = (id) => request("GET", `/sessions/${id}`);
 export const deleteSession = (id) => request("DELETE", `/sessions/${id}`);
 
 // ── Prompt / Approvals / Input ───────────────────────────
-export const sendPrompt = (id, prompt) =>
-  request("POST", `/sessions/${id}/prompt`, { prompt });
+export const sendPrompt = (id, prompt, attachments = null) =>
+  request("POST", `/sessions/${id}/prompt`, {
+    prompt,
+    ...(attachments ? { attachments } : {}),
+  });
 
 export const sendApproval = (id, requestId, approved) =>
   request("POST", `/sessions/${id}/approval/${requestId}`, { approved });

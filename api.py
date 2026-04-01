@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,8 +10,19 @@ from pydantic import BaseModel
 from engine import CopilotSessionController, resolve_config
 
 
+class AttachmentItem(BaseModel):
+    type: str
+    path: str | None = None
+    name: str | None = None
+    data: str | None = None
+    media_type: str | None = None
+    start: dict | None = None
+    end: dict | None = None
+
+
 class PromptRequest(BaseModel):
     prompt: str
+    attachments: list[AttachmentItem] | None = None
 
 
 class ApprovalRequest(BaseModel):
@@ -109,7 +121,8 @@ async def send_prompt(session_id: str, body: PromptRequest) -> dict:
     controller = await get_controller_or_404(session_id)
     if controller.busy:
         raise HTTPException(status_code=409, detail="session is busy")
-    asyncio.create_task(controller.send_prompt(body.prompt))
+    attachments = [a.model_dump(exclude_none=True) for a in body.attachments] if body.attachments else None
+    asyncio.create_task(controller.send_prompt(body.prompt, attachments=attachments))
     return {"started": True, "id": session_id, "prompt": body.prompt}
 
 

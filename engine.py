@@ -533,7 +533,48 @@ class CopilotSessionController:
     def unsubscribe(self, queue: asyncio.Queue) -> None:
         self._subscribers.discard(queue)
 
-    async def send_prompt(self, prompt: str) -> dict[str, Any]:
+    @staticmethod
+    def _validate_attachment_path(path_str: str) -> str:
+        """Validate attachment path exists and is within allowed directories."""
+        path = Path(path_str).expanduser().resolve()
+        repo_root = Path.cwd().resolve()
+        if not path.exists():
+            raise ValueError(f"Attachment path does not exist: {path}")
+        if path != repo_root and repo_root not in path.parents:
+            raise ValueError(f"Attachment path is outside allowed directories: {path}")
+        return str(path)
+
+    @staticmethod
+    def _build_attachment(attachment: dict[str, Any]) -> dict[str, Any]:
+        """Convert frontend attachment format to SDK format."""
+        att_type = attachment.get("type", "")
+        if att_type == "file":
+            path = CopilotSessionController._validate_attachment_path(attachment.get("path", ""))
+            return {"type": "file", "path": path}
+        if att_type == "directory":
+            path = CopilotSessionController._validate_attachment_path(attachment.get("path", ""))
+            return {"type": "directory", "path": path}
+        if att_type == "blob":
+            data = attachment.get("data", "")
+            if len(data) > 1_048_576:  # 1MB limit
+                raise ValueError("Blob attachment exceeds 1MB limit")
+            return {
+                "type": "blob",
+                "displayName": attachment.get("name", "attachment"),
+                "media_type": attachment.get("media_type", "text/plain"),
+                "data": data,
+            }
+        if att_type == "selection":
+            path = CopilotSessionController._validate_attachment_path(attachment.get("path", ""))
+            return {
+                "type": "selection",
+                "path": path,
+                "start": attachment.get("start", {"line": 0, "character": 0}),
+                "end": attachment.get("end", {"line": 0, "character": 0}),
+            }
+        raise ValueError(f"Unknown attachment type: {att_type}")
+
+    async def send_prompt(self, prompt: str, attachments: list[dict[str, Any]] | None = None) -> dict[str, Any]:
         await self.start()
 
         async with self._turn_lock:
@@ -545,7 +586,14 @@ class CopilotSessionController:
             for attempt in range(1, attempts + 1):
                 self._turn_state.reset()
                 try:
-                    await self.session.send_and_wait(prompt, timeout=self.config.timeout)
+                    sdk_attachments = None
+                    if attachments:
+                        try:
+                            sdk_attachments = [self._build_attachment(a) for a in attachments]
+                        except ValueError as exc:
+                            self._turn_state.last_error = str(exc)
+                            break
+                    await self.session.send_and_wait(prompt, timeout=self.config.timeout, attachments=sdk_attachments)
                 except ExitRequested:
                     raise
                 except asyncio.TimeoutError:
