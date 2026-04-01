@@ -394,6 +394,32 @@ class CopilotSessionController:
     def session_id(self) -> str:
         return self.sdk_session_id or self._fallback_id
 
+    def _build_hooks(self) -> dict:
+        """Build session hooks for tool execution logging."""
+        return {
+            "pre_tool_use": self._hook_pre_tool,
+            "post_tool_use": self._hook_post_tool,
+            "error_occurred": self._hook_error,
+        }
+
+    def _hook_pre_tool(self, hook_input):
+        """Log tool execution start for telemetry."""
+        tool_name = str(hook_input.get("tool_name", "unknown") if isinstance(hook_input, dict) else getattr(hook_input, "tool_name", "unknown"))
+        self._emit_threadsafe("hook_pre_tool", {"tool_name": tool_name})
+        return {}
+
+    def _hook_post_tool(self, hook_input):
+        """Log tool execution end."""
+        tool_name = str(hook_input.get("tool_name", "unknown") if isinstance(hook_input, dict) else getattr(hook_input, "tool_name", "unknown"))
+        self._emit_threadsafe("hook_post_tool", {"tool_name": tool_name})
+        return {}
+
+    def _hook_error(self, hook_input):
+        """Log errors for debugging."""
+        error = str(hook_input.get("error", "unknown") if isinstance(hook_input, dict) else getattr(hook_input, "error", "unknown"))
+        self._emit_threadsafe("session_warning", {"message": f"Hook error: {error}"})
+        return {}
+
     def _build_session_kwargs(self) -> dict[str, object]:
         session_kwargs: dict[str, object] = {
             "on_permission_request": self._on_permission_request,
@@ -408,6 +434,7 @@ class CopilotSessionController:
             session_kwargs["reasoning_effort"] = self.config.reasoning_effort
         if self.config.working_directory:
             session_kwargs["working_directory"] = self.config.working_directory
+        session_kwargs["hooks"] = self._build_hooks()
         return session_kwargs
 
     def runtime_metadata(self) -> dict[str, Any]:
