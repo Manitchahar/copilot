@@ -178,13 +178,19 @@ export default function ActiveSessionPage() {
       });
     }
 
-    // Extract folder paths
+    // Extract folder paths (deduplicate by normalised directory)
     const dirMatch = resultText.match(/(?:\/[\w.-]+){2,}/g);
     if (dirMatch) {
       setFolders((prev) => {
         const existing = new Set(prev.map((f) => f.path));
+        const seen = new Set(existing);
         const newFolders = dirMatch
-          .filter((d) => !existing.has(d))
+          .map((d) => d.replace(/\/[^/]+\.[^/]+$/, "")) // strip trailing filename
+          .filter((d) => {
+            if (seen.has(d)) return false;
+            seen.add(d);
+            return true;
+          })
           .slice(0, 5)
           .map((d) => ({
             icon: "folder",
@@ -524,8 +530,8 @@ export default function ActiveSessionPage() {
   const toneClasses = statusToneClasses(statusTone);
 
   return (
-    <div className="min-h-screen overflow-hidden bg-background text-on-background">
-      <div className="flex min-h-screen overflow-hidden">
+    <div className="h-screen overflow-hidden bg-background text-on-background">
+      <div className="flex h-full overflow-hidden">
         {/* ── Sidebar ─────────────────────────────────── */}
         <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-outline-variant/30 bg-surface-container-low py-6 md:flex">
           <div className="mb-10 px-6">
@@ -583,7 +589,7 @@ export default function ActiveSessionPage() {
         </aside>
 
         {/* ── Main content ────────────────────────────── */}
-        <main className="flex min-w-0 flex-1 flex-col">
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <header className="sticky top-0 z-50 flex w-full items-center justify-between bg-background/80 px-8 py-4 shadow-sm backdrop-blur-xl">
             <div className="flex items-center gap-8">
               <Link
@@ -626,19 +632,16 @@ export default function ActiveSessionPage() {
 
           <section className="flex flex-1 overflow-hidden">
             {/* ── Chat area ────────────────────────────── */}
-            <div className="relative flex flex-1 flex-col border-r border-outline-variant/10 bg-surface">
-              {/* Status card */}
-              <div className="p-4">
-                <div className={`rounded-[1rem] border p-4 ${toneClasses.card}`}>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <RuntimeBadge label="Engine" value={sessionMeta.engine} />
-                    <RuntimeBadge label="Model" value={sessionMeta.model} />
-                    <RuntimeBadge label="Provider" value={sessionMeta.provider} />
-                    <RuntimeBadge label="Approvals" value={sessionMeta.approval_mode} />
-                  </div>
-                  <div className={`mt-3 flex items-center gap-2 text-sm ${toneClasses.text}`}>
-                    <span className={`h-2.5 w-2.5 rounded-full ${toneClasses.dot}`} />
-                    <span>{statusText}</span>
+            <div className="relative flex min-h-0 flex-1 flex-col border-r border-outline-variant/10 bg-surface">
+              {/* Status card — runtime details live in the sidebar */}
+              <div className="px-4 pt-4 pb-2">
+                <div className={`rounded-[1rem] border px-4 py-3 ${toneClasses.card}`}>
+                  <div className={`flex items-center gap-2 text-sm font-medium ${toneClasses.text}`}>
+                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${toneClasses.dot}`} />
+                    <span className="truncate">{statusText}</span>
+                    <span className="ml-auto shrink-0 rounded-full bg-surface-container px-2.5 py-0.5 text-[11px] font-normal text-secondary">
+                      {sessionMeta.model}
+                    </span>
                   </div>
                   {lastTurnError && (
                     <p className="mt-2 text-sm text-red-700">{lastTurnError}</p>
@@ -691,7 +694,7 @@ export default function ActiveSessionPage() {
             </div>
 
             {/* ── Right sidebar ────────────────────────── */}
-            <aside className="custom-scrollbar hidden w-96 flex-col gap-8 overflow-y-auto bg-surface-container-low p-8 lg:flex">
+            <aside className="custom-scrollbar hidden w-96 shrink-0 flex-col gap-8 overflow-y-auto bg-surface-container-low p-8 lg:flex">
               <div>
                 <h2 className="mb-6 font-newsreader text-xl font-bold text-on-surface">
                   Session Intelligence
@@ -810,7 +813,7 @@ export default function ActiveSessionPage() {
                           <span className="material-symbols-outlined text-secondary transition-colors group-hover:text-primary">
                             {folder.icon}
                           </span>
-                          <span className="font-body text-sm text-on-surface truncate">
+                          <span className="font-body text-sm text-on-surface truncate" title={folder.path}>
                             {folder.path}
                           </span>
                         </div>

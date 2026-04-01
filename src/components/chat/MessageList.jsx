@@ -31,39 +31,43 @@ export default function MessageList({ messages, isTyping, pendingRequests, rende
     <div className="relative flex-1 overflow-hidden">
       <div
         ref={containerRef}
-        className="custom-scrollbar h-full overflow-y-auto px-8 pb-4 pt-6"
+        className="custom-scrollbar h-full overflow-y-auto"
       >
-        {messages.length === 0 && (
-          <div className="flex h-full flex-col items-center justify-center text-center">
-            <span className="material-symbols-outlined mb-3 text-5xl text-primary/30">
-              chat_bubble
-            </span>
-            <p className="font-headline text-lg text-on-surface/40">
-              Start a conversation
-            </p>
-          </div>
-        )}
-
-        {groups.map((group, i) => (
-          <MessageGroup key={group[0].id || i} messages={group} />
-        ))}
-
-        {isTyping && (
-          <div className="mt-4 flex items-start">
-            <div className="mr-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
-              <span className="material-symbols-outlined text-base text-primary">
-                smart_toy
-              </span>
+        <div className="mx-auto max-w-[48rem] px-4 pb-6 pt-4">
+          {messages.length === 0 && (
+            <div className="flex h-[60vh] flex-col items-center justify-center text-center">
+              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary/70">
+                <span className="material-symbols-outlined text-xl text-white">
+                  auto_awesome
+                </span>
+              </div>
+              <p className="text-lg font-medium text-on-surface/50">
+                How can I help you today?
+              </p>
             </div>
-            <div className="rounded-2xl rounded-tl-md bg-surface-container-low px-4 py-1">
-              <TypingIndicator />
+          )}
+
+          {groups.map((group, i) => (
+            <MessageGroup key={group[0].id || i} messages={group} />
+          ))}
+
+          {isTyping && (
+            <div className="mt-6 flex items-start">
+              <div className="mr-3 mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary/70">
+                <span className="material-symbols-outlined text-[14px] text-white">
+                  auto_awesome
+                </span>
+              </div>
+              <div className="pt-1">
+                <TypingIndicator />
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {pendingRequests?.map((req) => renderPendingRequest(req))}
+          {pendingRequests?.map((req) => renderPendingRequest(req))}
 
-        <div ref={sentinelRef} className="h-1" />
+          <div ref={sentinelRef} className="h-1" />
+        </div>
       </div>
 
       <ScrollPill visible={showPill} onClick={scrollToBottom} />

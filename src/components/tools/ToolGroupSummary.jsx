@@ -13,19 +13,21 @@ export default function ToolGroupSummary({ tools }) {
       <button
         onClick={() => setExpanded(!expanded)}
         className={cn(
-          "flex w-full items-center gap-2 rounded-xl border px-3 py-2",
-          "bg-surface-container border-outline-variant/30",
-          "hover:bg-surface-container-high transition-colors text-left"
+          "flex w-full items-center gap-2 rounded-lg border px-3 py-2",
+          "border-outline-variant/20 bg-surface-container-high/20",
+          "hover:bg-surface-container-high/40 transition-colors text-left"
         )}
       >
-        <span className="material-symbols-outlined text-lg text-on-surface/60">menu_book</span>
-        <span className="flex-1 font-label text-[13px] font-medium text-on-surface/70">
-          {hasError ? `Researched ${count} files (with errors)` : `Researched ${count} files`}
+        <span className={cn(
+          "material-symbols-outlined text-[16px]",
+          hasError ? "text-error" : allDone ? "text-green-600" : "text-on-surface/40"
+        )}>
+          {hasError ? "error" : allDone ? "check_circle" : "progress_activity"}
         </span>
-        {allDone && (
-          <span className="material-symbols-outlined text-sm text-tertiary">check_circle</span>
-        )}
-        <span className="material-symbols-outlined text-sm text-on-surface/40">
+        <span className="flex-1 text-[13px] font-medium text-on-surface/60">
+          Researched {count} files
+        </span>
+        <span className="material-symbols-outlined text-[14px] text-on-surface/25">
           {expanded ? "expand_less" : "expand_more"}
         </span>
       </button>

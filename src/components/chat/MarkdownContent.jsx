@@ -22,7 +22,7 @@ const components = {
 
     return (
       <code
-        className="rounded bg-surface-container-high px-1.5 py-0.5 font-mono text-sm font-medium"
+        className="rounded-md border border-outline-variant/40 bg-surface-container-high/50 px-1.5 py-0.5 font-mono text-[0.875em] text-on-surface"
         {...props}
       >
         {children}
@@ -35,7 +35,7 @@ const components = {
         href={href}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-primary underline underline-offset-2 hover:text-primary/80"
+        className="text-primary underline decoration-primary/30 underline-offset-2 hover:decoration-primary/60 transition-colors"
       >
         {children}
       </a>
@@ -43,56 +43,62 @@ const components = {
   },
   table({ children }) {
     return (
-      <div className="my-3 overflow-x-auto rounded-lg border border-outline-variant">
+      <div className="my-4 overflow-x-auto rounded-lg border border-outline-variant/40">
         <table className="min-w-full text-sm">{children}</table>
       </div>
     );
   },
   th({ children }) {
     return (
-      <th className="border-b border-outline-variant bg-surface-container px-3 py-2 text-left font-semibold">
+      <th className="border-b border-outline-variant/40 bg-surface-container-high/30 px-4 py-2.5 text-left text-[13px] font-semibold text-on-surface/80">
         {children}
       </th>
     );
   },
   td({ children }) {
     return (
-      <td className="border-b border-outline-variant/50 px-3 py-2">{children}</td>
+      <td className="border-b border-outline-variant/20 px-4 py-2.5 text-[14px]">{children}</td>
     );
   },
   blockquote({ children }) {
     return (
-      <blockquote className="my-3 border-l-4 border-primary/30 pl-4 italic text-on-surface/70">
+      <blockquote className="my-4 border-l-[3px] border-primary/30 pl-4 text-on-surface/70">
         {children}
       </blockquote>
     );
   },
   hr() {
-    return <hr className="my-4 border-outline-variant" />;
+    return <hr className="my-6 border-outline-variant/30" />;
   },
   ul({ children }) {
-    return <ul className="my-2 list-disc space-y-1 pl-6">{children}</ul>;
+    return <ul className="my-3 list-disc space-y-1.5 pl-6 marker:text-on-surface/30">{children}</ul>;
   },
   ol({ children }) {
-    return <ol className="my-2 list-decimal space-y-1 pl-6">{children}</ol>;
+    return <ol className="my-3 list-decimal space-y-1.5 pl-6 marker:text-on-surface/40">{children}</ol>;
   },
   h1({ children }) {
-    return <h1 className="mb-3 mt-4 text-xl font-bold">{children}</h1>;
+    return <h1 className="mb-3 mt-6 text-2xl font-semibold tracking-tight">{children}</h1>;
   },
   h2({ children }) {
-    return <h2 className="mb-2 mt-3 text-lg font-bold">{children}</h2>;
+    return <h2 className="mb-2 mt-5 text-xl font-semibold tracking-tight">{children}</h2>;
   },
   h3({ children }) {
-    return <h3 className="mb-2 mt-3 text-base font-semibold">{children}</h3>;
+    return <h3 className="mb-2 mt-4 text-lg font-semibold">{children}</h3>;
   },
   p({ children }) {
-    return <p className="my-1.5 leading-relaxed">{children}</p>;
+    return <p className="my-2 leading-[1.7]">{children}</p>;
+  },
+  li({ children }) {
+    return <li className="leading-[1.7]">{children}</li>;
   },
 };
 
 export default function MarkdownContent({ content, isStreaming = false }) {
   return (
-    <div className={cn("markdown-body font-body text-[15px]", isStreaming && "streaming-cursor")}>
+    <div className={cn(
+      "prose-claude text-[15.5px] leading-[1.7] text-on-surface",
+      isStreaming && "streaming-cursor"
+    )}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
