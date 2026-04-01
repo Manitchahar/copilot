@@ -384,6 +384,9 @@ class CopilotSessionController:
         self._subscribers: set[asyncio.Queue] = set()
         self._pending_requests: dict[str, PendingDecision] = {}
         self._recent_events: list[dict[str, Any]] = []
+        self._session_title: str | None = None
+        self._context_usage: dict[str, int] = {"used": 0, "total": 0}
+        self._total_tokens: int = 0
         self._provider = build_provider_from_env()
 
     @property
@@ -517,6 +520,9 @@ class CopilotSessionController:
                 for pending in self._pending_requests.values()
             ],
             "recent_events": self._recent_events[-20:],
+            "title": self._session_title,
+            "context_usage": self._context_usage,
+            "total_tokens": self._total_tokens,
         }
 
     def subscribe(self, *, replay_recent: bool = True) -> asyncio.Queue:
@@ -973,10 +979,14 @@ class CopilotSessionController:
             self._emit_threadsafe("assistant_intent", {"intent": intent})
 
     def _handle_assistant_usage(self, event_name, data):
+        prompt_tokens = getattr(data, "prompt_tokens", 0) or getattr(data, "input_tokens", 0) or 0
+        completion_tokens = getattr(data, "completion_tokens", 0) or getattr(data, "output_tokens", 0) or 0
+        total = getattr(data, "total_tokens", 0) or (prompt_tokens + completion_tokens)
+        self._total_tokens += total
         self._emit_threadsafe("usage_stats", {
-            "prompt_tokens": getattr(data, "prompt_tokens", 0) or getattr(data, "input_tokens", 0) or 0,
-            "completion_tokens": getattr(data, "completion_tokens", 0) or getattr(data, "output_tokens", 0) or 0,
-            "total_tokens": getattr(data, "total_tokens", 0) or 0,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total,
         })
 
     def _handle_turn_start(self, event_name, data):
@@ -998,13 +1008,14 @@ class CopilotSessionController:
     def _handle_title_changed(self, event_name, data):
         title = normalize_text(getattr(data, "title", None))
         if title:
+            self._session_title = title
             self._emit_threadsafe("title_changed", {"title": title})
 
     def _handle_context_changed(self, event_name, data):
-        self._emit_threadsafe("context_changed", {
-            "used": getattr(data, "used", 0) or 0,
-            "total": getattr(data, "total", 0) or 0,
-        })
+        used = getattr(data, "used", 0) or 0
+        total = getattr(data, "total", 0) or 0
+        self._context_usage = {"used": used, "total": total}
+        self._emit_threadsafe("context_changed", {"used": used, "total": total})
 
     def _handle_mode_changed(self, event_name, data):
         mode = normalize_text(getattr(data, "mode", None))
