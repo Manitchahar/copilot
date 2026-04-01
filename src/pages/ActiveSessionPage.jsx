@@ -346,7 +346,7 @@ export default function ActiveSessionPage() {
             pushMessage({
               role: "user",
               content: data.prompt,
-              id: \`u-\${Date.now()}\`,
+              id: `u-\${Date.now()}`,
             });
             setQueryCount((c) => c + 1);
           }
@@ -356,7 +356,7 @@ export default function ActiveSessionPage() {
           setStatusTone("working");
           setStatusText("Writing response");
           if (!streamingRef.current) {
-            const msgId = \`a-\${Date.now()}\`;
+            const msgId = `a-\${Date.now()}`;
             streamingRef.current = msgId;
             pushMessage({
               role: "assistant",
@@ -383,7 +383,7 @@ export default function ActiveSessionPage() {
               pushMessage({
                 role: "assistant",
                 content: data.content,
-                id: \`a-\${Date.now()}\`,
+                id: `a-\${Date.now()}`,
               });
             }
           }
@@ -667,9 +667,9 @@ export default function ActiveSessionPage() {
               {/* Connection indicator */}
               <div className="flex items-center gap-2 text-xs text-secondary">
                 <span
-                  className={\`h-2 w-2 rounded-full \${
+                  className={`h-2 w-2 rounded-full \${
                     connected ? "bg-green-500" : "bg-red-400"
-                  }\`}
+                  }`}
                 />
                 {connected ? "Live" : "Offline"}
               </div>
@@ -690,7 +690,7 @@ export default function ActiveSessionPage() {
                 ref={chatRef}
                 className="custom-scrollbar flex-1 space-y-6 overflow-y-auto p-8"
               >
-                <div className={\`rounded-[1rem] border p-4 \${toneClasses.card}\`}>
+                <div className={`rounded-[1rem] border p-4 \${toneClasses.card}`}>
                   <div className="flex flex-wrap items-center gap-2">
                     <RuntimeBadge label="Engine" value={sessionMeta.engine} />
                     <RuntimeBadge label="Model" value={sessionMeta.model} />
@@ -700,8 +700,8 @@ export default function ActiveSessionPage() {
                       value={sessionMeta.approval_mode}
                     />
                   </div>
-                  <div className={\`mt-3 flex items-center gap-2 text-sm \${toneClasses.text}\`}>
-                    <span className={\`h-2.5 w-2.5 rounded-full \${toneClasses.dot}\`} />
+                  <div className={`mt-3 flex items-center gap-2 text-sm \${toneClasses.text}`}>
+                    <span className={`h-2.5 w-2.5 rounded-full \${toneClasses.dot}`} />
                     <span>{statusText}</span>
                   </div>
                   {lastTurnError && (
@@ -720,9 +720,9 @@ export default function ActiveSessionPage() {
                 {messages.map((msg) => (
                   <div
                     key={msg.id}
-                    className={\`flex \${
+                    className={`flex \${
                       msg.role === "user" ? "justify-end" : "justify-start gap-4"
-                    }\`}
+                    }`}
                   >
                     {msg.role === "assistant" && (
                       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary text-on-secondary">
@@ -756,7 +756,7 @@ export default function ActiveSessionPage() {
                     <div className="inline-flex items-center gap-2 rounded-full bg-secondary-container px-4 py-2 text-xs font-label text-on-secondary-container">
                       <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
                       {activeTools.length > 0
-                        ? \`Running \${activeTools.map((t) => t.name).join(", ")}…\`
+                        ? `Running \${activeTools.map((t) => t.name).join(", ")}…`
                         : "Thinking…"}
                     </div>
                   </div>
@@ -880,9 +880,9 @@ export default function ActiveSessionPage() {
                   <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-secondary">
                     Run Status
                   </h3>
-                  <div className={\`rounded-[1rem] border p-4 \${toneClasses.card}\`}>
-                    <div className={\`flex items-center gap-2 text-sm font-medium \${toneClasses.text}\`}>
-                      <span className={\`h-2.5 w-2.5 rounded-full \${toneClasses.dot}\`} />
+                  <div className={`rounded-[1rem] border p-4 \${toneClasses.card}`}>
+                    <div className={`flex items-center gap-2 text-sm font-medium \${toneClasses.text}`}>
+                      <span className={`h-2.5 w-2.5 rounded-full \${toneClasses.dot}`} />
                       <span>{statusText}</span>
                     </div>
                     {lastTurnError && (
@@ -1059,7 +1059,7 @@ export default function ActiveSessionPage() {
           </span>
         </a>
         <Link
-          to={\`/session?id=\${sessionId}\`}
+          to={`/session?id=\${sessionId}`}
           className="-translate-y-4 scale-110 rounded-full bg-primary p-4 text-background shadow-lg shadow-primary/20"
         >
           <span className="material-symbols-outlined">monitoring</span>
