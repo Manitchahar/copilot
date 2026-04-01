@@ -821,7 +821,107 @@ class CopilotSessionController:
             },
         )
 
+    def _handle_assistant_intent(self, event_name, data):
+        intent = normalize_text(getattr(data, "intent", None))
+        if intent:
+            self._emit_threadsafe("assistant_intent", {"intent": intent})
+
+    def _handle_assistant_usage(self, event_name, data):
+        self._emit_threadsafe("usage_stats", {
+            "prompt_tokens": getattr(data, "prompt_tokens", 0) or getattr(data, "input_tokens", 0) or 0,
+            "completion_tokens": getattr(data, "completion_tokens", 0) or getattr(data, "output_tokens", 0) or 0,
+            "total_tokens": getattr(data, "total_tokens", 0) or 0,
+        })
+
+    def _handle_turn_start(self, event_name, data):
+        self._emit_threadsafe("turn_started_sdk", {})
+
+    def _handle_turn_end(self, event_name, data):
+        self._emit_threadsafe("turn_complete_sdk", {})
+
+    def _handle_reasoning_delta(self, event_name, data):
+        chunk = normalize_text(getattr(data, "delta_content", None) or getattr(data, "content", None))
+        if chunk:
+            self._emit_threadsafe("reasoning_delta", {"content": chunk})
+
+    def _handle_reasoning_complete(self, event_name, data):
+        content = normalize_text(getattr(data, "content", None))
+        if content:
+            self._emit_threadsafe("reasoning_complete", {"content": content})
+
+    def _handle_title_changed(self, event_name, data):
+        title = normalize_text(getattr(data, "title", None))
+        if title:
+            self._emit_threadsafe("title_changed", {"title": title})
+
+    def _handle_context_changed(self, event_name, data):
+        self._emit_threadsafe("context_changed", {
+            "used": getattr(data, "used", 0) or 0,
+            "total": getattr(data, "total", 0) or 0,
+        })
+
+    def _handle_mode_changed(self, event_name, data):
+        mode = normalize_text(getattr(data, "mode", None))
+        if mode:
+            self._emit_threadsafe("mode_changed", {"mode": mode})
+
+    def _handle_session_warning(self, event_name, data):
+        message = normalize_text(getattr(data, "message", None))
+        if message:
+            self._emit_threadsafe("session_warning", {"message": message})
+
+    def _handle_session_info(self, event_name, data):
+        message = normalize_text(getattr(data, "message", None))
+        if message:
+            self._emit_threadsafe("session_info", {"message": message})
+
+    def _handle_subagent_started(self, event_name, data):
+        self._emit_threadsafe("subagent_started", {
+            "agent_id": normalize_text(getattr(data, "agent_id", None)) or "",
+            "agent_name": normalize_text(getattr(data, "agent_name", None)) or "",
+        })
+
+    def _handle_subagent_completed(self, event_name, data):
+        self._emit_threadsafe("subagent_completed", {
+            "agent_id": normalize_text(getattr(data, "agent_id", None)) or "",
+        })
+
+    def _handle_subagent_failed(self, event_name, data):
+        self._emit_threadsafe("subagent_failed", {
+            "agent_id": normalize_text(getattr(data, "agent_id", None)) or "",
+            "error": normalize_text(getattr(data, "error", None)) or "",
+        })
+
+    def _handle_skill_invoked(self, event_name, data):
+        self._emit_threadsafe("skill_invoked", {
+            "skill_name": normalize_text(getattr(data, "skill_name", None) or getattr(data, "name", None)) or "",
+        })
+
+    def _handle_permission_completed(self, event_name, data):
+        self._emit_threadsafe("permission_resolved", {
+            "request_id": normalize_text(getattr(data, "request_id", None)) or "",
+        })
+
+    def _handle_input_completed(self, event_name, data):
+        self._emit_threadsafe("input_resolved", {
+            "request_id": normalize_text(getattr(data, "request_id", None)) or "",
+        })
+
+    def _handle_session_start(self, event_name, data):
+        self._emit_threadsafe("session_connected", {})
+
+    def _handle_abort(self, event_name, data):
+        self._busy = False
+        self._emit_threadsafe("turn_aborted", {})
+
+    def _handle_skills_loaded(self, event_name, data):
+        self._emit_threadsafe("skills_loaded", {})
+
+    def _handle_mcp_loaded(self, event_name, data):
+        self._emit_threadsafe("mcp_loaded", {})
+
     _EVENT_DISPATCH = {
+        # Existing
         "assistant_message_delta": _handle_assistant_delta,
         "assistant_message": _handle_assistant_message,
         "session_error": _handle_session_error,
@@ -831,6 +931,34 @@ class CopilotSessionController:
         "tool_execution_partial_result": _handle_tool_partial,
         "tool_execution_progress": _handle_tool_progress,
         "tool_execution_complete": _handle_tool_complete,
+        # New — assistant events
+        "assistant_intent": _handle_assistant_intent,
+        "assistant_usage": _handle_assistant_usage,
+        "assistant_turn_start": _handle_turn_start,
+        "assistant_turn_end": _handle_turn_end,
+        "assistant_reasoning_delta": _handle_reasoning_delta,
+        "assistant_reasoning": _handle_reasoning_complete,
+        # New — session events
+        "session_title_changed": _handle_title_changed,
+        "session_context_changed": _handle_context_changed,
+        "session_mode_changed": _handle_mode_changed,
+        "session_warning": _handle_session_warning,
+        "session_info": _handle_session_info,
+        "session_start": _handle_session_start,
+        # New — subagent events
+        "subagent_started": _handle_subagent_started,
+        "subagent_completed": _handle_subagent_completed,
+        "subagent_failed": _handle_subagent_failed,
+        # New — skill events
+        "skill_invoked": _handle_skill_invoked,
+        # New — resolution events
+        "permission_completed": _handle_permission_completed,
+        "user_input_completed": _handle_input_completed,
+        # New — abort
+        "abort": _handle_abort,
+        # Informational
+        "session_skills_loaded": _handle_skills_loaded,
+        "session_mcp_servers_loaded": _handle_mcp_loaded,
     }
 
     def _on_sdk_event(self, event) -> None:
