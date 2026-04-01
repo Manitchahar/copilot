@@ -122,6 +122,13 @@ async def abort_turn(session_id: str) -> dict:
     return {"aborted": aborted, "id": session_id}
 
 
+@app.get("/sessions/{session_id}/history")
+async def get_history(session_id: str) -> dict:
+    controller = await get_controller_or_404(session_id)
+    messages = await controller.get_history()
+    return {"messages": messages}
+
+
 @app.post("/sessions/{session_id}/approval/{request_id}")
 async def reply_permission(session_id: str, request_id: str, body: ApprovalRequest) -> dict:
     controller = await get_controller_or_404(session_id)

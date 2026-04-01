@@ -56,6 +56,9 @@ export const sendUserInput = (id, requestId, answer, wasFreeform = true) =>
 export const abortTurn = (id) =>
   request("POST", `/sessions/${id}/abort`);
 
+export const getHistory = (id) =>
+  request("GET", `/sessions/${id}/history`);
+
 // ── WebSocket event stream ───────────────────────────────
 export function connectEvents(sessionId) {
   const wsBase = API_BASE

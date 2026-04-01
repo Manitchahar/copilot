@@ -576,6 +576,57 @@ class CopilotSessionController:
         await self._emit("turn_aborted", {})
         return True
 
+    @staticmethod
+    def _serialize_sdk_payload(value):
+        """Recursively serialize SDK objects into JSON-safe dicts."""
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, list):
+            return [CopilotSessionController._serialize_sdk_payload(item) for item in value]
+        if isinstance(value, dict):
+            return {
+                str(key): CopilotSessionController._serialize_sdk_payload(item)
+                for key, item in value.items()
+            }
+        if hasattr(value, "model_dump"):
+            return CopilotSessionController._serialize_sdk_payload(
+                value.model_dump(exclude_none=True)
+            )
+        if hasattr(value, "__dict__"):
+            return {
+                key: CopilotSessionController._serialize_sdk_payload(item)
+                for key, item in vars(value).items()
+                if not key.startswith("_") and item is not None
+            }
+        return str(value)
+
+    async def get_history(self) -> list[dict[str, Any]]:
+        """Get full conversation history from SDK."""
+        if not self.session:
+            return []
+        try:
+            messages = await self.session.get_messages()
+        except Exception:
+            return []
+        result = []
+        for event in messages:
+            event_name = normalized_event_type(event)
+            data = getattr(event, "data", None)
+            entry = {
+                "id": normalize_text(
+                    getattr(data, "message_id", None)
+                    or getattr(data, "tool_call_id", None)
+                    or getattr(data, "request_id", None)
+                ),
+                "type": event_name,
+                "data": self._serialize_sdk_payload(data),
+            }
+            timestamp = getattr(event, "timestamp", None) or getattr(data, "timestamp", None)
+            if timestamp is not None:
+                entry["timestamp"] = serialize_event_value(timestamp)
+            result.append(entry)
+        return result
+
     def resolve_permission(self, request_id: str, approved: bool) -> bool:
         pending = self._pending_requests.get(request_id)
         if pending is None or pending.kind != "permission":
