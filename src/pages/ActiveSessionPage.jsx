@@ -444,6 +444,14 @@ export default function ActiveSessionPage() {
           }
           break;
 
+        case "turn_aborted":
+          setBusy(false);
+          setStatusTone("ready");
+          setStatusText("Turn cancelled");
+          appendActivity(type, data);
+          setMsgState((prev) => processEvent(prev, type, data));
+          break;
+
         case "session_error":
           setError(data?.message || "An error occurred");
           setLastTurnError(data?.message || "An error occurred");

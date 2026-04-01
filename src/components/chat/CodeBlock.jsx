@@ -1,11 +1,18 @@
 import { useCallback, useState } from "react";
 import { cn } from "../ui/cn";
 
+function extractText(node) {
+  if (typeof node === "string") return node;
+  if (Array.isArray(node)) return node.map(extractText).join("");
+  if (node?.props?.children) return extractText(node.props.children);
+  return "";
+}
+
 export default function CodeBlock({ language, children }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(() => {
-    const text = typeof children === "string" ? children : "";
+    const text = extractText(children);
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);

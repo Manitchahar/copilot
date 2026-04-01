@@ -5,14 +5,17 @@ import CodeBlock from "./CodeBlock";
 import { cn } from "../ui/cn";
 
 const components = {
-  code({ inline, className, children, ...props }) {
+  code({ node, className, children, ...props }) {
     const match = /language-(\w+)/.exec(className || "");
     const language = match ? match[1] : "";
+    const isBlock = node?.position?.start?.line !== node?.position?.end?.line
+      || match
+      || (typeof children === "string" && children.includes("\n"));
 
-    if (!inline && (match || String(children).includes("\n"))) {
+    if (isBlock) {
       return (
         <CodeBlock language={language}>
-          {String(children).replace(/\n$/, "")}
+          {children}
         </CodeBlock>
       );
     }

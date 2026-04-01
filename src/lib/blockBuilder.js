@@ -23,7 +23,11 @@ export function createInitialState() {
 function findOrCreateAssistantMsg(state) {
   const last = state.messages[state.messages.length - 1];
   if (last && last.role === "assistant" && last.id === state.streamingMsgId) {
-    return last;
+    const cloned = { ...last, blocks: last.blocks.map((b) =>
+      b.type === "text" ? { ...b } : b.type === "tool-group" ? { ...b, tools: [...b.tools] } : { ...b }
+    )};
+    state.messages[state.messages.length - 1] = cloned;
+    return cloned;
   }
   const msg = {
     id: `a-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
