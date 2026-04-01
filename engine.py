@@ -662,6 +662,7 @@ class CopilotSessionController:
         except Exception:
             pass
         self._busy = False
+        self._turn_state.idle.set()
         await self._emit("turn_aborted", {})
         return True
 

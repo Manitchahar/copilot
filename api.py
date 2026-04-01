@@ -112,7 +112,10 @@ async def get_session(session_id: str) -> dict:
 
 @app.delete("/sessions/{session_id}")
 async def delete_session(session_id: str) -> dict:
-    await registry.remove(session_id)
+    try:
+        await registry.remove(session_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="session not found") from exc
     return {"deleted": True, "id": session_id}
 
 
@@ -122,7 +125,7 @@ async def send_prompt(session_id: str, body: PromptRequest) -> dict:
     if controller.busy:
         raise HTTPException(status_code=409, detail="session is busy")
     attachments = [a.model_dump(exclude_none=True) for a in body.attachments] if body.attachments else None
-    asyncio.create_task(controller.send_prompt(body.prompt, attachments=attachments))
+    asyncio.create_task(controller.send_prompt(body.prompt, attachments=attachments), name=f"prompt-{session_id[:8]}")
     return {"started": True, "id": session_id, "prompt": body.prompt}
 
 
@@ -164,7 +167,11 @@ async def reply_user_input(session_id: str, request_id: str, body: UserInputRequ
 
 @app.websocket("/sessions/{session_id}/events")
 async def session_events(websocket: WebSocket, session_id: str) -> None:
-    controller = await get_controller_or_404(session_id)
+    try:
+        controller = await registry.get(session_id)
+    except KeyError:
+        await websocket.close(code=4004, reason="session not found")
+        return
     await websocket.accept()
     queue = controller.subscribe(replay_recent=True)
     try:
