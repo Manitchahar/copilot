@@ -75,4 +75,7 @@ permission_prompt_text: "Approve this action? [y/N]: "
 approval_yes_values: [y, yes]
 permission_block_message: "Blocked by local safety policy."
 permission_deny_message: "Denied by interactive policy."
+
+# reasoning_effort: medium
+# working_directory: .
  
