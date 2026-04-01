@@ -53,3 +53,28 @@ input {
   background: #dbc1b9;
   border-radius: 10px;
 }
+
+/* Typing indicator */
+.typing-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #7c7570;
+  animation: typingBounce 1.2s ease-in-out infinite;
+}
+
+@keyframes typingBounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-6px); opacity: 1; }
+}
+
+/* Streaming cursor */
+.streaming-cursor::after {
+  content: "▌";
+  animation: blink 1s step-end infinite;
+  color: #99462a;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
