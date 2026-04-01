@@ -564,6 +564,18 @@ class CopilotSessionController:
             )
             return result
 
+    async def abort(self) -> bool:
+        """Cancel the current turn. Returns True if abort was sent."""
+        if not self.session or not self._busy:
+            return False
+        try:
+            await self.session.abort()
+        except Exception:
+            pass
+        self._busy = False
+        await self._emit("turn_aborted", {})
+        return True
+
     def resolve_permission(self, request_id: str, approved: bool) -> bool:
         pending = self._pending_requests.get(request_id)
         if pending is None or pending.kind != "permission":

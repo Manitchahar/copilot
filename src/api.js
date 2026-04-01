@@ -53,6 +53,9 @@ export const sendUserInput = (id, requestId, answer, wasFreeform = true) =>
     was_freeform: wasFreeform,
   });
 
+export const abortTurn = (id) =>
+  request("POST", `/sessions/${id}/abort`);
+
 // ── WebSocket event stream ───────────────────────────────
 export function connectEvents(sessionId) {
   const wsBase = API_BASE
