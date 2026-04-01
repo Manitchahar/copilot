@@ -37,3 +37,14 @@ __pycache__/
 
 # Ignore external vendored repository.
 open-interpreter/
+!src/
+!src/**
+!public/
+!public/**
+!index.html
+!package.json
+!package-lock.json
+!vite.config.js
+!tailwind.config.js
+!postcss.config.js
+!.eslintrc.cjs
