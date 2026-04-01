@@ -579,41 +579,49 @@ class CopilotSessionController:
 
         async with self._turn_lock:
             self._busy = True
+            self._turn_state.reset()
             await self._emit("turn_started", {"prompt": prompt})
 
-            attempts = self.config.max_retries + 1
+            sdk_attachments = None
+            if attachments:
+                try:
+                    sdk_attachments = [self._build_attachment(a) for a in attachments]
+                except ValueError as exc:
+                    self._busy = False
+                    await self._emit("turn_complete", {"prompt": prompt, "final_content": None, "error": str(exc)})
+                    return {"prompt": prompt, "final_content": None, "error": str(exc)}
+
             result: dict[str, Any] = {"prompt": prompt, "final_content": None, "error": None}
+            attempts = self.config.max_retries + 1
+
             for attempt in range(1, attempts + 1):
                 self._turn_state.reset()
                 try:
-                    sdk_attachments = None
-                    if attachments:
-                        try:
-                            sdk_attachments = [self._build_attachment(a) for a in attachments]
-                        except ValueError as exc:
-                            self._turn_state.last_error = str(exc)
-                            break
-                    await self.session.send_and_wait(prompt, timeout=self.config.timeout, attachments=sdk_attachments)
+                    # Fire-and-forget: send() returns a message_id, does not block
+                    await self.session.send(prompt, attachments=sdk_attachments)
                 except ExitRequested:
                     raise
-                except asyncio.TimeoutError:
-                    self._turn_state.last_error = f"Timed out after {self.config.timeout:.1f}s"
                 except Exception as exc:
                     self._turn_state.last_error = str(exc)
 
+                # Wait for the SDK to signal idle (turn complete)
                 try:
                     await asyncio.wait_for(
                         self._turn_state.idle.wait(),
                         timeout=self.config.timeout + self.config.idle_wait_extra_seconds,
                     )
                 except asyncio.TimeoutError:
-                    messages = await self.session.get_messages()
-                    for event in reversed(messages):
-                        if is_assistant_message(event):
-                            content = getattr(event.data, "content", None)
-                            if content:
-                                self._turn_state.final_content = content
-                                break
+                    # Fallback: try to recover content from message history
+                    try:
+                        messages = await self.session.get_messages()
+                        for event in reversed(messages):
+                            if is_assistant_message(event):
+                                content = getattr(event.data, "content", None)
+                                if content:
+                                    self._turn_state.final_content = content
+                                    break
+                    except Exception:
+                        pass
 
                 if self._turn_state.final_content:
                     result["final_content"] = self._turn_state.final_content
