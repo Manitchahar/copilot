@@ -62,6 +62,10 @@ export const abortTurn = (id) =>
 export const getHistory = (id) =>
   request("GET", `/sessions/${id}/history`);
 
+// ── Connector Config ─────────────────────────────────────
+export const getConnectorConfig = () => request("GET", "/config/connectors");
+export const saveConnectorConfig = (config) => request("PUT", "/config/connectors", config);
+
 // ── WebSocket event stream ───────────────────────────────
 export function connectEvents(sessionId) {
   const wsBase = API_BASE

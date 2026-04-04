@@ -165,6 +165,50 @@ export function processEvent(state, type, data) {
       break;
     }
 
+    case "subagent_started": {
+      const msg = findOrCreateAssistantMsg(next);
+      msg.blocks.push({
+        type: "subagent",
+        agentId: data?.agent_id || "",
+        agentName: data?.agent_name || data?.agent_id || "Subagent",
+        status: "running",
+        error: null,
+      });
+      break;
+    }
+
+    case "subagent_completed": {
+      const msg = findOrCreateAssistantMsg(next);
+      const block = msg.blocks.find(
+        (b) => b.type === "subagent" && b.agentId === data?.agent_id
+      );
+      if (block) {
+        block.status = "completed";
+      }
+      break;
+    }
+
+    case "subagent_failed": {
+      const msg = findOrCreateAssistantMsg(next);
+      const block = msg.blocks.find(
+        (b) => b.type === "subagent" && b.agentId === data?.agent_id
+      );
+      if (block) {
+        block.status = "failed";
+        block.error = data?.error || "Unknown error";
+      }
+      break;
+    }
+
+    case "skill_invoked": {
+      const msg = findOrCreateAssistantMsg(next);
+      msg.blocks.push({
+        type: "skill",
+        skillName: data?.skill_name || "Unknown skill",
+      });
+      break;
+    }
+
     case "turn_complete": {
       if (next.streamingMsgId) {
         const msg = next.messages.find((m) => m.id === next.streamingMsgId);

@@ -34,12 +34,23 @@ class UserInputRequest(BaseModel):
     was_freeform: bool = True
 
 
+class CreateSessionRequest(BaseModel):
+    mcp_servers: dict | None = None
+    skill_directories: list[str] | None = None
+    disabled_skills: list[str] | None = None
+    custom_agents: list[dict] | None = None
+
+
 class SessionRegistry:
     def __init__(self) -> None:
         self._sessions: dict[str, CopilotSessionController] = {}
 
-    async def create(self) -> CopilotSessionController:
+    async def create(self, overrides: dict | None = None) -> CopilotSessionController:
         config, _ = resolve_config()
+        if overrides:
+            for key, value in overrides.items():
+                if value is not None and hasattr(config, key):
+                    setattr(config, key, value)
         controller = CopilotSessionController(config, mode="service")
         await controller.start()
         self._sessions[controller.session_id] = controller
@@ -99,8 +110,9 @@ async def list_sessions() -> dict:
 
 
 @app.post("/sessions")
-async def create_session() -> dict:
-    controller = await registry.create()
+async def create_session(body: CreateSessionRequest | None = None) -> dict:
+    overrides = body.model_dump(exclude_none=True) if body else None
+    controller = await registry.create(overrides=overrides)
     return controller.snapshot()
 
 
@@ -143,6 +155,32 @@ async def get_history(session_id: str) -> dict:
     controller = await get_controller_or_404(session_id)
     messages = await controller.get_history()
     return {"messages": messages}
+
+
+class ConnectorConfigRequest(BaseModel):
+    mcp_servers: dict | None = None
+    skill_directories: list[str] | None = None
+    disabled_skills: list[str] | None = None
+    custom_agents: list[dict] | None = None
+
+
+@app.get("/config/connectors")
+async def get_connector_config() -> dict:
+    config, _ = resolve_config()
+    return {
+        "mcp_servers": config.mcp_servers,
+        "skill_directories": config.skill_directories,
+        "disabled_skills": config.disabled_skills,
+        "custom_agents": config.custom_agents,
+    }
+
+
+@app.put("/config/connectors")
+async def save_connector_config(body: ConnectorConfigRequest) -> dict:
+    from engine import save_connector_config as do_save
+    updates = body.model_dump(exclude_none=True)
+    do_save(updates)
+    return {"saved": True}
 
 
 @app.post("/sessions/{session_id}/approval/{request_id}")

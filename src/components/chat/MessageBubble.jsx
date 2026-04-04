@@ -2,6 +2,8 @@ import { cn } from "../ui/cn";
 import MarkdownContent from "./MarkdownContent";
 import ToolEventCard from "../tools/ToolEventCard";
 import ToolGroupSummary from "../tools/ToolGroupSummary";
+import SubagentCard from "../agents/SubagentCard";
+import SkillBadge from "../agents/SkillBadge";
 
 function BlockRenderer({ block, isStreaming }) {
   switch (block.type) {
@@ -11,6 +13,10 @@ function BlockRenderer({ block, isStreaming }) {
       return <ToolEventCard tool={block} />;
     case "tool-group":
       return <ToolGroupSummary tools={block.tools} />;
+    case "subagent":
+      return <SubagentCard block={block} />;
+    case "skill":
+      return <SkillBadge block={block} />;
     default:
       return null;
   }

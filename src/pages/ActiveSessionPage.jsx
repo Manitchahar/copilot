@@ -12,13 +12,15 @@ import { createInitialState, processEvent } from "../lib/blockBuilder";
 import MessageList from "../components/chat/MessageList";
 import ChatInput from "../components/chat/ChatInput";
 import PermissionCard from "../components/tools/PermissionCard";
+import MCPStatusPanel from "../components/agents/MCPStatusPanel";
+import ConnectorsPanel from "../components/connectors/ConnectorsPanel";
 
 // ── Sidebar nav items ────────────────────────────────────
 const sidebarItems = [
-  { icon: "monitoring", label: "Monitor", active: true, href: "/session" },
+  { icon: "monitoring", label: "Monitor", id: "chat" },
   { icon: "menu_book", label: "Research", href: "/" },
   { icon: "edit_note", label: "Notes", href: "#" },
-  { icon: "database", label: "Sources", href: "#" },
+  { icon: "hub", label: "Connectors", id: "connectors" },
 ];
 
 // ── Helpers ──────────────────────────────────────────────
@@ -64,6 +66,18 @@ function summariseEvent(type, data = {}) {
       return data.error ? "Run stopped with an error" : "Run completed";
     case "session_error":
       return data.message ? trimStatusText(data.message, 90) : "Session error";
+    case "subagent_started":
+      return data.agent_name ? `Subagent started: ${data.agent_name}` : "Subagent started";
+    case "subagent_completed":
+      return "Subagent completed";
+    case "subagent_failed":
+      return data.error ? `Subagent failed: ${trimStatusText(data.error, 60)}` : "Subagent failed";
+    case "skill_invoked":
+      return data.skill_name ? `Skill invoked: ${data.skill_name}` : "Skill invoked";
+    case "skills_loaded":
+      return "Skills loaded";
+    case "mcp_loaded":
+      return "MCP servers loaded";
     default:
       return type.replaceAll("_", " ");
   }
@@ -121,10 +135,14 @@ export default function ActiveSessionPage() {
 
   // Sidebar state (populated from events)
   const [activeTools, setActiveTools] = useState([]); // running tool names
+  const [activeSubagents, setActiveSubagents] = useState([]);
+  const [loadedSkills, setLoadedSkills] = useState([]);
+  const [mcpStatus, setMcpStatus] = useState({ loaded: false, servers: [] });
   const [artifacts, setArtifacts] = useState([]);
   const [folders, setFolders] = useState([]);
   const [queryCount, setQueryCount] = useState(0);
   const [currentFile, setCurrentFile] = useState(null);
+  const [activeView, setActiveView] = useState("chat"); // "chat" | "connectors"
 
   // Pending approval / input requests
   const [pendingRequests, setPendingRequests] = useState([]); // { request_id, kind, payload }
@@ -232,6 +250,9 @@ export default function ActiveSessionPage() {
     setError(null);
     setLastTurnError(null);
     setActiveTools([]);
+    setActiveSubagents([]);
+    setLoadedSkills([]);
+    setMcpStatus({ loaded: false, servers: [] });
     setArtifacts([]);
     setFolders([]);
     setQueryCount(0);
@@ -466,6 +487,65 @@ export default function ActiveSessionPage() {
           appendActivity(type, data, "error");
           break;
 
+        case "subagent_started": {
+          setActiveSubagents((prev) => [
+            ...prev,
+            { id: data.agent_id, name: data.agent_name || data.agent_id, status: "running" },
+          ]);
+          setStatusText(summariseEvent(type, data));
+          setStatusTone("working");
+          appendActivity(type, data, "working");
+          setMsgState((s) => processEvent(s, type, data));
+          break;
+        }
+
+        case "subagent_completed": {
+          setActiveSubagents((prev) =>
+            prev.map((a) => a.id === data.agent_id ? { ...a, status: "completed" } : a)
+          );
+          setStatusText(summariseEvent(type, data));
+          appendActivity(type, data, "ready");
+          setMsgState((s) => processEvent(s, type, data));
+          break;
+        }
+
+        case "subagent_failed": {
+          setActiveSubagents((prev) =>
+            prev.map((a) => a.id === data.agent_id ? { ...a, status: "failed", error: data.error } : a)
+          );
+          setStatusText(summariseEvent(type, data));
+          setStatusTone("error");
+          appendActivity(type, data, "error");
+          setMsgState((s) => processEvent(s, type, data));
+          break;
+        }
+
+        case "skill_invoked": {
+          setLoadedSkills((prev) => {
+            const name = data.skill_name;
+            if (prev.includes(name)) return prev;
+            return [...prev, name];
+          });
+          setStatusText(summariseEvent(type, data));
+          appendActivity(type, data, "working");
+          setMsgState((s) => processEvent(s, type, data));
+          break;
+        }
+
+        case "skills_loaded": {
+          if (data.skills && data.skills.length > 0) {
+            setLoadedSkills(data.skills);
+          }
+          appendActivity(type, data, "ready");
+          break;
+        }
+
+        case "mcp_loaded": {
+          setMcpStatus({ loaded: true, servers: data.servers || [] });
+          appendActivity(type, data, "ready");
+          break;
+        }
+
         default:
           break;
       }
@@ -552,6 +632,7 @@ export default function ActiveSessionPage() {
 
           <nav className="flex-1 space-y-1 px-2">
             {sidebarItems.map((item) => {
+              const isActive = item.id ? activeView === item.id : false;
               const content = (
                 <>
                   <span className="material-symbols-outlined">
@@ -562,15 +643,22 @@ export default function ActiveSessionPage() {
                   </span>
                 </>
               );
-              const className = item.active
+              const cls = isActive
                 ? "ml-2 flex items-center gap-3 rounded-l-full bg-surface px-4 py-3 font-bold text-primary shadow-sm"
-                : "mx-2 flex items-center gap-3 rounded-full px-6 py-3 text-secondary transition-colors hover:bg-surface-container-high";
+                : "mx-2 flex items-center gap-3 rounded-full px-6 py-3 text-secondary transition-colors hover:bg-surface-container-high cursor-pointer";
+              if (item.id) {
+                return (
+                  <button key={item.label} onClick={() => setActiveView(item.id)} className={cls}>
+                    {content}
+                  </button>
+                );
+              }
               return item.href.startsWith("/") ? (
-                <Link key={item.label} to={item.href} className={className}>
+                <Link key={item.label} to={item.href} className={cls}>
                   {content}
                 </Link>
               ) : (
-                <a key={item.label} href={item.href} className={className}>
+                <a key={item.label} href={item.href} className={cls}>
                   {content}
                 </a>
               );
@@ -631,6 +719,12 @@ export default function ActiveSessionPage() {
           </header>
 
           <section className="flex flex-1 overflow-hidden">
+            {activeView === "connectors" ? (
+              <div className="flex-1 bg-background">
+                <ConnectorsPanel />
+              </div>
+            ) : (
+            <>
             {/* ── Chat area ────────────────────────────── */}
             <div className="relative flex min-h-0 flex-1 flex-col border-r border-outline-variant/10 bg-surface">
               {/* Status card — runtime details live in the sidebar */}
@@ -715,6 +809,16 @@ export default function ActiveSessionPage() {
                     <RuntimeRow label="Model" value={sessionMeta.model} />
                     <RuntimeRow label="Provider" value={sessionMeta.provider} />
                     <RuntimeRow label="Approvals" value={sessionMeta.approval_mode} />
+                    {sessionMeta.mcp_servers && sessionMeta.mcp_servers.length > 0 && (
+                      <p className="text-xs text-secondary">
+                        MCP: {sessionMeta.mcp_servers.join(", ")}
+                      </p>
+                    )}
+                    {sessionMeta.custom_agents && sessionMeta.custom_agents.length > 0 && (
+                      <p className="text-xs text-secondary">
+                        Agents: {sessionMeta.custom_agents.join(", ")}
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -844,6 +948,54 @@ export default function ActiveSessionPage() {
                   </div>
                 )}
 
+                <MCPStatusPanel mcpStatus={mcpStatus} />
+
+                {activeSubagents.length > 0 && (
+                  <div className="mb-10">
+                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-secondary">
+                      Active Subagents
+                    </h3>
+                    <ul className="space-y-2">
+                      {activeSubagents.map((agent) => (
+                        <li
+                          key={agent.id}
+                          className="flex items-center gap-2 text-xs text-on-surface"
+                        >
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full ${
+                              agent.status === "running"
+                                ? "bg-blue-500 animate-pulse"
+                                : agent.status === "completed"
+                                ? "bg-emerald-500"
+                                : "bg-red-500"
+                            }`}
+                          />
+                          <span className="truncate">{agent.name}</span>
+                          <span className="ml-auto text-secondary capitalize">{agent.status}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {loadedSkills.length > 0 && (
+                  <div className="mb-10">
+                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-secondary">
+                      Skills
+                    </h3>
+                    <div className="flex flex-wrap gap-1">
+                      {loadedSkills.map((skill) => (
+                        <span
+                          key={skill}
+                          className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50/50 px-2 py-0.5 text-xs text-violet-700"
+                        >
+                          {skill}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {activityLog.length > 0 && (
                   <div className="mb-10">
                     <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-secondary">
@@ -885,6 +1037,8 @@ export default function ActiveSessionPage() {
                 </div>
               </div>
             </aside>
+            </>
+            )}
           </section>
         </main>
       </div>

@@ -6,8 +6,41 @@ export default {
   theme: {
     extend: {
       colors: {
+        /* --- shadcn semantic tokens (CSS-variable-driven) --- */
+        border: "hsl(var(--border) / <alpha-value>)",
+        input: "hsl(var(--input) / <alpha-value>)",
+        ring: "hsl(var(--ring) / <alpha-value>)",
+        background: "hsl(var(--background) / <alpha-value>)",
+        foreground: "hsl(var(--foreground) / <alpha-value>)",
+        primary: {
+          DEFAULT: "hsl(var(--primary) / <alpha-value>)",
+          foreground: "hsl(var(--primary-foreground) / <alpha-value>)",
+        },
+        secondary: {
+          DEFAULT: "hsl(var(--secondary) / <alpha-value>)",
+          foreground: "hsl(var(--secondary-foreground) / <alpha-value>)",
+        },
+        destructive: {
+          DEFAULT: "hsl(var(--destructive) / <alpha-value>)",
+        },
+        muted: {
+          DEFAULT: "hsl(var(--muted) / <alpha-value>)",
+          foreground: "hsl(var(--muted-foreground) / <alpha-value>)",
+        },
+        accent: {
+          DEFAULT: "hsl(var(--accent) / <alpha-value>)",
+          foreground: "hsl(var(--accent-foreground) / <alpha-value>)",
+        },
+        popover: {
+          DEFAULT: "hsl(var(--popover) / <alpha-value>)",
+          foreground: "hsl(var(--popover-foreground) / <alpha-value>)",
+        },
+        card: {
+          DEFAULT: "hsl(var(--card) / <alpha-value>)",
+          foreground: "hsl(var(--card-foreground) / <alpha-value>)",
+        },
+        /* --- Material 3 palette (kept for existing components) --- */
         "secondary-container": "#e0e5cc",
-        primary: "#d97757",
         "surface-tint": "#d97757",
         "surface-container-highest": "#e0e0db",
         "outline-variant": "#d4d4d0",
@@ -16,7 +49,6 @@ export default {
         "on-secondary-fixed-variant": "#444937",
         "on-primary": "#ffffff",
         "on-tertiary-container": "#2b2c1a",
-        background: "#f3f3ee",
         "surface-container-low": "#ffffff",
         outline: "#999999",
         "on-surface": "#1a1a1a",
@@ -26,7 +58,6 @@ export default {
         "on-primary-fixed": "#390b00",
         "inverse-on-surface": "#f2f1ee",
         "secondary-fixed": "#e0e5cc",
-        secondary: "#666666",
         "on-tertiary-fixed": "#1c1d0c",
         "on-error-container": "#93000a",
         "surface-container-lowest": "#ffffff",

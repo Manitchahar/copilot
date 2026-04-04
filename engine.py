@@ -9,7 +9,7 @@ import threading
 from typing import Any
 from uuid import uuid4
 
-from copilot import CopilotClient
+from copilot import CopilotClient, CustomAgentConfig, MCPLocalServerConfig, MCPRemoteServerConfig
 from copilot.types import PermissionRequestResult
 
 
@@ -43,6 +43,10 @@ class AppConfig:
     permission_deny_message: str = "Denied by interactive policy."
     reasoning_effort: str | None = None
     working_directory: str | None = None
+    mcp_servers: dict = field(default_factory=dict)
+    skill_directories: list[str] = field(default_factory=list)
+    disabled_skills: list[str] = field(default_factory=list)
+    custom_agents: list[dict] = field(default_factory=list)
 
 
 class ExitRequested(Exception):
@@ -270,9 +274,27 @@ def resolve_config() -> tuple[AppConfig, Path]:
             ),
             reasoning_effort=to_str(config.get("reasoning_effort"), None) if config.get("reasoning_effort") else None,
             working_directory=to_str(config.get("working_directory"), None) if config.get("working_directory") else None,
+            mcp_servers=config.get("mcp_servers") or {},
+            skill_directories=config.get("skill_directories") or [],
+            disabled_skills=config.get("disabled_skills") or [],
+            custom_agents=config.get("custom_agents") or [],
         ),
         config_path,
     )
+
+
+def save_connector_config(updates: dict) -> None:
+    """Merge connector fields into config.yaml and save."""
+    import yaml
+    config_path = Path("config.yaml")
+    if config_path.exists():
+        raw = yaml.safe_load(config_path.read_text()) or {}
+    else:
+        raw = {}
+    for key in ("mcp_servers", "skill_directories", "disabled_skills", "custom_agents"):
+        if key in updates:
+            raw[key] = updates[key]
+    config_path.write_text(yaml.dump(raw, default_flow_style=False, sort_keys=False))
 
 
 def normalize_text(value) -> str | None:
@@ -438,6 +460,25 @@ class CopilotSessionController:
         if self.config.working_directory:
             session_kwargs["working_directory"] = self.config.working_directory
         session_kwargs["hooks"] = self._build_hooks()
+        if self.config.custom_agents:
+            session_kwargs["custom_agents"] = [
+                CustomAgentConfig(**agent) for agent in self.config.custom_agents
+            ]
+        if self.config.skill_directories:
+            session_kwargs["skill_directories"] = self.config.skill_directories
+        if self.config.disabled_skills:
+            session_kwargs["disabled_skills"] = self.config.disabled_skills
+        if self.config.mcp_servers:
+            sdk_mcp = {}
+            for name, srv in self.config.mcp_servers.items():
+                if isinstance(srv, dict):
+                    if srv.get("url"):
+                        sdk_mcp[name] = MCPRemoteServerConfig(**{k: v for k, v in srv.items() if v is not None})
+                    else:
+                        sdk_mcp[name] = MCPLocalServerConfig(**{k: v for k, v in srv.items() if v is not None})
+                else:
+                    sdk_mcp[name] = srv
+            session_kwargs["mcp_servers"] = sdk_mcp
         return session_kwargs
 
     def runtime_metadata(self) -> dict[str, Any]:
@@ -448,6 +489,10 @@ class CopilotSessionController:
             "approval_mode": self.config.command_approval_mode,
             "streaming": self.config.streaming_enabled,
             "tool_events": self.config.show_tool_events,
+            "custom_agents": [a.get("name", "unnamed") for a in self.config.custom_agents] if self.config.custom_agents else [],
+            "skill_directories": self.config.skill_directories,
+            "disabled_skills": self.config.disabled_skills,
+            "mcp_servers": list(self.config.mcp_servers.keys()) if self.config.mcp_servers else [],
         }
 
     async def start(self, *, session_id: str | None = None, resume: bool = False) -> None:
@@ -1073,10 +1118,18 @@ class CopilotSessionController:
         self._emit_threadsafe("turn_aborted", {})
 
     def _handle_skills_loaded(self, event_name, data):
-        self._emit_threadsafe("skills_loaded", {})
+        skills = []
+        if data:
+            skills = getattr(data, "skills", None) or getattr(data, "skill_names", None) or []
+        self._emit_threadsafe("skills_loaded", {"skills": skills})
 
     def _handle_mcp_loaded(self, event_name, data):
-        self._emit_threadsafe("mcp_loaded", {})
+        servers = []
+        if data:
+            servers = getattr(data, "servers", None) or getattr(data, "server_names", None) or []
+            if not servers:
+                servers = list(self.config.mcp_servers.keys()) if self.config.mcp_servers else []
+        self._emit_threadsafe("mcp_loaded", {"servers": servers})
 
     _EVENT_DISPATCH = {
         # Existing

@@ -1,5 +1,5 @@
 # Minimal runtime config
-model: gpt-4.1
+model: gpt-5.4-mini
 timeout: 60
 max_retries: 2
 idle_wait_extra_seconds: 5
@@ -78,4 +78,49 @@ permission_deny_message: "Denied by interactive policy."
 
 # reasoning_effort: medium
 # working_directory: .
+
+# MCP Servers
+# Configure Model Context Protocol servers for extended tool capabilities.
+# Each server needs a unique name and either a command (local) or url (remote).
+#
+# mcp_servers:
+#   filesystem:
+#     command: npx
+#     args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
+#   github:
+#     command: npx
+#     args: ["-y", "@modelcontextprotocol/server-github"]
+#     env:
+#       GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_..."
+#   remote-server:
+#     url: "http://localhost:3001/sse"
+#     headers:
+#       Authorization: "Bearer token"
+
+# Skills
+# Load skill definitions from directories. Skills extend the agent's capabilities.
+#
+# skill_directories:
+#   - ./skills
+#   - /path/to/shared/skills
+#
+# disabled_skills:
+#   - skill-name-to-disable
  
+
+# Custom Agents
+# Define specialized sub-agents the main agent can delegate to.
+#
+# custom_agents:
+#   - name: code-reviewer
+#     display_name: Code Reviewer
+#     description: Reviews code for bugs, security issues, and best practices
+#     prompt: |
+#       You are a code review specialist. Analyze code for bugs,
+#       security vulnerabilities, and suggest improvements.
+#   - name: test-writer
+#     display_name: Test Writer
+#     description: Generates comprehensive test suites
+#     prompt: |
+#       You are a testing specialist. Write thorough tests
+#       covering edge cases and error conditions.
