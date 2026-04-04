@@ -1,6 +1,7 @@
+import { memo } from "react";
 import { cn } from "../ui/cn";
 
-export default function ScrollPill({ visible, onClick }) {
+export default memo(function ScrollPill({ visible, onClick }) {
   return (
     <button
       onClick={onClick}
@@ -19,4 +20,4 @@ export default function ScrollPill({ visible, onClick }) {
       New messages
     </button>
   );
-}
+});

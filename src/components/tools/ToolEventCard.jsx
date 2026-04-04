@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { cn } from "../ui/cn";
 import { getToolLabel, getToolIcon } from "../../lib/classifyToolEvent";
 
-export default function ToolEventCard({ tool }) {
+export default React.memo(function ToolEventCard({ tool }) {
   const { toolName, toolCallId, arguments: args, status, resultText, errorText } = tool;
   const [elapsed, setElapsed] = useState(0);
   const [expanded, setExpanded] = useState(status === "error");
@@ -10,7 +10,7 @@ export default function ToolEventCard({ tool }) {
   useEffect(() => {
     if (status !== "running") return;
     const start = Date.now();
-    const id = setInterval(() => setElapsed(((Date.now() - start) / 1000).toFixed(1)), 100);
+    const id = setInterval(() => setElapsed(((Date.now() - start) / 1000).toFixed(1)), 1000);
     return () => clearInterval(id);
   }, [status]);
 
@@ -72,4 +72,4 @@ export default function ToolEventCard({ tool }) {
       )}
     </div>
   );
-}
+});

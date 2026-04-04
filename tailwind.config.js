@@ -89,8 +89,8 @@ export default {
         headline: ["ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],
         body: ["ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],
         label: ["ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],
-        newsreader: ["ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],
-        manrope: ["ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto", "sans-serif"],
+        newsreader: ["'Newsreader'", "Georgia", "serif"],
+        manrope: ["'Manrope'", "ui-sans-serif", "system-ui", "sans-serif"],
         mono: ["'Fira Code'", "'Fira Mono'", "Menlo", "Consolas", "'DejaVu Sans Mono'", "monospace"],
       },
       borderRadius: {

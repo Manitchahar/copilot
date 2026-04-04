@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import {
   abortTurn,
   connectEvents,
@@ -15,8 +15,9 @@ import MessageList from "../components/chat/MessageList";
 import ChatInput from "../components/chat/ChatInput";
 import PermissionCard from "../components/tools/PermissionCard";
 import MCPStatusPanel from "../components/agents/MCPStatusPanel";
-import ConnectorsPanel from "../components/connectors/ConnectorsPanel";
 import useConnectorConfig from "../hooks/useConnectorConfig";
+
+const ConnectorsPanel = lazy(() => import("../components/connectors/ConnectorsPanel"));
 
 // ── Helpers ──────────────────────────────────────────────
 function trimStatusText(value, max = 120) {
@@ -137,9 +138,11 @@ function fileToBase64(file) {
 }
 
 export default function ActiveSessionPage() {
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const sessionId = searchParams.get("id");
   const resumeRequested = searchParams.get("resume") === "1";
+  const initialPrompt = location.state?.initialPrompt || null;
   const commandRoute = sessionId ? `/commands?sessionId=${encodeURIComponent(sessionId)}` : "/commands";
   const sidebarItems = [
     { icon: "monitoring", label: "Monitor", id: "chat" },
@@ -223,10 +226,23 @@ export default function ActiveSessionPage() {
   const reconnectTimerRef = useRef(null);
   const reconnectAttemptRef = useRef(0);
   const manualCloseRef = useRef(false);
+  const initialPromptSentRef = useRef(false);
 
   useEffect(() => {
     document.title = "Cloud Cowork Active Session";
   }, []);
+
+  useEffect(() => {
+    if (!sessionId || !initialPrompt || initialPromptSentRef.current) return;
+    initialPromptSentRef.current = true;
+    sendPrompt(sessionId, initialPrompt)
+      .catch(() => {
+        setError("Could not start the initial prompt");
+        setStatusTone("error");
+        setStatusText("Initial prompt failed");
+        initialPromptSentRef.current = false;
+      });
+  }, [initialPrompt, sessionId]);
 
   // ── Extract artifacts / folders from tool events ───────
   const processToolComplete = useCallback((data) => {
@@ -819,7 +835,7 @@ export default function ActiveSessionPage() {
   ]);
 
   // ── Handlers ───────────────────────────────────────────
-  const handleApproval = async (requestId, approved) => {
+  const handleApproval = useCallback(async (requestId, approved) => {
     try {
       await sendApproval(sessionId, requestId, approved);
       setPendingRequests((prev) =>
@@ -828,9 +844,9 @@ export default function ActiveSessionPage() {
     } catch (err) {
       console.error("Approval failed:", err);
     }
-  };
+  }, [sessionId]);
 
-  const handleUserInput = async (requestId, answer) => {
+  const handleUserInput = useCallback(async (requestId, answer) => {
     try {
       setStatusTone("working");
       setStatusText("Answer sent. Continuing the run…");
@@ -845,7 +861,45 @@ export default function ActiveSessionPage() {
       setStatusTone("error");
       setStatusText("Input submission failed");
     }
-  };
+  }, [sessionId]);
+
+  const renderPendingRequest = useCallback((req) => {
+    if (req.kind === "permission") {
+      return (
+        <PermissionCard
+          key={req.request_id}
+          request={req}
+          onApprove={(id) => handleApproval(id, true)}
+          onDeny={(id) => handleApproval(id, false)}
+        />
+      );
+    }
+    return (
+      <UserInputBanner
+        key={req.request_id}
+        req={req}
+        onSubmit={(answer) => handleUserInput(req.request_id, answer)}
+      />
+    );
+  }, [handleApproval, handleUserInput]);
+
+  const handleSend = useCallback((text, mode) => {
+    const outgoingAttachments = draftAttachments.map((item) => item.attachment);
+    if (!text && outgoingAttachments.length === 0) return;
+    const resolvedMode = busy && mode === "run" ? "enqueue" : mode;
+    sendPrompt(sessionId, text, outgoingAttachments, resolvedMode)
+      .then(() => {
+        setInputText("");
+        setDraftAttachments([]);
+        if (busy && mode === "run") {
+          setSendMode("enqueue");
+        }
+        setError(null);
+      })
+      .catch((err) => {
+        setError(err.message || "Could not send prompt");
+      });
+  }, [draftAttachments, busy, sessionId]);
 
   // ── No session ID guard ────────────────────────────────
   if (!sessionId) {
@@ -983,11 +1037,9 @@ export default function ActiveSessionPage() {
                 {connected ? "Live" : "Offline"}
               </div>
               <div className="h-8 w-8 overflow-hidden rounded-full border border-outline-variant">
-                <img
-                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuARkImWc52BWoTjge5UGSbt5Oxc4C95JNdj1YU0H13Q-r-5sfxE4YOAxGxcv8oZPqNcOwk8BaA6wmq8tMnVsybaGa3oK7hLfcOge0LSb4cI_28ux7fgTvD-c-gr7VQTkPYM2vWARCa9IKxLhox7p-swpukTgjM6fAxYlQ8tMupMCmq6s1iI8rkONqT4eyQIPIIgkX7XyYDLF_IC5ANjycbKVOO3uXCxpi6ABNoWLYGM-GByeJ-AgicW-BEH6jB6n8BJk7eWZp4Atfg"
-                  alt="User avatar"
-                  className="h-full w-full object-cover"
-                />
+                <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary/15 to-primary/30 text-[11px] font-semibold text-primary">
+                  CW
+                </div>
               </div>
             </div>
           </header>
@@ -995,7 +1047,18 @@ export default function ActiveSessionPage() {
           <section className="flex flex-1 overflow-hidden">
             {activeView === "connectors" ? (
               <div className="flex-1 bg-background">
-                <ConnectorsPanel connectorConfig={connectorConfig} />
+                <Suspense
+                  fallback={
+                    <div className="flex h-full items-center justify-center">
+                      <div className="rounded-[1.25rem] border border-outline-variant/20 bg-surface px-6 py-5 text-center shadow-sm">
+                        <p className="font-medium text-on-surface">Loading connectors…</p>
+                        <p className="mt-1 text-sm text-secondary">Preparing integration settings</p>
+                      </div>
+                    </div>
+                  }
+                >
+                  <ConnectorsPanel connectorConfig={connectorConfig} />
+                </Suspense>
               </div>
             ) : (
             <>
@@ -1028,46 +1091,12 @@ export default function ActiveSessionPage() {
                 messages={msgState.messages}
                 isTyping={busy && !msgState.streamingMsgId}
                 pendingRequests={pendingRequests}
-                renderPendingRequest={(req) => {
-                  if (req.kind === "permission") {
-                    return (
-                      <PermissionCard
-                        key={req.request_id}
-                        request={req}
-                        onApprove={(id) => handleApproval(id, true)}
-                        onDeny={(id) => handleApproval(id, false)}
-                      />
-                    );
-                  }
-                  return (
-                    <UserInputBanner
-                      key={req.request_id}
-                      req={req}
-                      onSubmit={(answer) => handleUserInput(req.request_id, answer)}
-                    />
-                  );
-                }}
+                renderPendingRequest={renderPendingRequest}
               />
               <ChatInput
                 value={inputText}
                 onChange={setInputText}
-                onSend={(text, mode) => {
-                  const outgoingAttachments = draftAttachments.map((item) => item.attachment);
-                  if (!text && outgoingAttachments.length === 0) return;
-                  const resolvedMode = busy && mode === "run" ? "enqueue" : mode;
-                  sendPrompt(sessionId, text, outgoingAttachments, resolvedMode)
-                    .then(() => {
-                      setInputText("");
-                      setDraftAttachments([]);
-                      if (busy && mode === "run") {
-                        setSendMode("enqueue");
-                      }
-                      setError(null);
-                    })
-                    .catch((err) => {
-                      setError(err.message || "Could not send prompt");
-                    });
-                }}
+                onSend={handleSend}
                 onAbort={() => abortTurn(sessionId)}
                 disabled={isUploading}
                 isBusy={busy}

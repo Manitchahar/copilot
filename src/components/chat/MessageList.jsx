@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useSmartScroll } from "../../hooks/useSmartScroll";
 import MessageGroup from "./MessageGroup";
 import TypingIndicator from "./TypingIndicator";
@@ -23,9 +24,10 @@ export default function MessageList({ messages, isTyping, pendingRequests, rende
   const { containerRef, sentinelRef, showPill, scrollToBottom } = useSmartScroll([
     messages,
     isTyping,
+    pendingRequests?.length ?? 0,
   ]);
 
-  const groups = groupMessages(messages);
+  const groups = useMemo(() => groupMessages(messages), [messages]);
 
   return (
     <div className="relative flex-1 overflow-hidden">
@@ -64,7 +66,11 @@ export default function MessageList({ messages, isTyping, pendingRequests, rende
             </div>
           )}
 
-          {pendingRequests?.map((req) => renderPendingRequest(req))}
+          {pendingRequests?.map((req) => (
+            <div key={req.request_id} className="mt-6">
+              {renderPendingRequest(req)}
+            </div>
+          ))}
 
           <div ref={sentinelRef} className="h-1" />
         </div>

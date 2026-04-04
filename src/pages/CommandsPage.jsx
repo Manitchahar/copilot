@@ -204,8 +204,9 @@ export default function CommandsPage() {
       }
 
       const session = await createSession();
-      await sendPrompt(session.id, prompt.trim());
-      navigate(`/session?id=${session.id}`);
+      navigate(`/session?id=${session.id}`, {
+        state: { initialPrompt: prompt.trim() },
+      });
     } catch (err) {
       setError(formatStartError(err));
     } finally {

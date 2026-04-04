@@ -1,8 +1,13 @@
+import React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
+import "highlight.js/styles/github-dark.min.css";
 import CodeBlock from "./CodeBlock";
 import { cn } from "../ui/cn";
+
+const REMARK_PLUGINS = [remarkGfm];
+const REHYPE_PLUGINS = [rehypeHighlight];
 
 const components = {
   code({ node, className, children, ...props }) {
@@ -93,19 +98,19 @@ const components = {
   },
 };
 
-export default function MarkdownContent({ content, isStreaming = false }) {
+export default React.memo(function MarkdownContent({ content, isStreaming = false }) {
   return (
     <div className={cn(
       "prose-claude text-[15.5px] leading-[1.7] text-on-surface",
       isStreaming && "streaming-cursor"
     )}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight]}
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={REHYPE_PLUGINS}
         components={components}
       >
         {content || ""}
       </ReactMarkdown>
     </div>
   );
-}
+});

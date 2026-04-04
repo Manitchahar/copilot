@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { cn } from "../ui/cn";
 
 const STATUS_STYLES = {
@@ -21,7 +22,7 @@ const STATUS_STYLES = {
   },
 };
 
-export default function SubagentCard({ block }) {
+export default memo(function SubagentCard({ block }) {
   const { agentName, status, error } = block;
   const style = STATUS_STYLES[status] || STATUS_STYLES.running;
 
@@ -45,4 +46,4 @@ export default function SubagentCard({ block }) {
       </div>
     </div>
   );
-}
+});

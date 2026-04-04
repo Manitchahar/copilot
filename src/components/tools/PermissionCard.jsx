@@ -1,6 +1,7 @@
+import { memo } from "react";
 import { cn } from "../ui/cn";
 
-export default function PermissionCard({ request, onApprove, onDeny }) {
+export default memo(function PermissionCard({ request, onApprove, onDeny }) {
   const { request_id, payload } = request;
   const toolName = payload?.tool_name || "Unknown tool";
   const command = payload?.full_command_text || payload?.command || "";
@@ -41,4 +42,4 @@ export default function PermissionCard({ request, onApprove, onDeny }) {
       </div>
     </div>
   );
-}
+});

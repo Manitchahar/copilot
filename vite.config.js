@@ -9,6 +9,15 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          router: ["react-router", "react-router-dom"],
+        },
+      },
+    },
+  },
   server: {
     proxy: {
       "/sessions": {

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { useAutoResize } from "../../hooks/useAutoResize";
 import { cn } from "../ui/cn";
 
@@ -8,7 +8,7 @@ const SEND_MODE_LABELS = {
   immediate: "Steer next",
 };
 
-export default function ChatInput({
+export default React.memo(function ChatInput({
   value,
   onChange,
   onSend,
@@ -239,4 +239,4 @@ export default function ChatInput({
       </div>
     </div>
   );
-}
+});

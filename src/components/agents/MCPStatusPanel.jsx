@@ -1,4 +1,6 @@
-export default function MCPStatusPanel({ mcpStatus }) {
+import { memo } from "react";
+
+export default memo(function MCPStatusPanel({ mcpStatus }) {
   if (!mcpStatus.loaded && mcpStatus.servers.length === 0) return null;
 
   return (
@@ -28,4 +30,4 @@ export default function MCPStatusPanel({ mcpStatus }) {
       )}
     </div>
   );
-}
+});

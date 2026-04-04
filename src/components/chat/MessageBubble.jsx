@@ -1,14 +1,23 @@
+import React, { Suspense, lazy } from "react";
 import { cn } from "../ui/cn";
-import MarkdownContent from "./MarkdownContent";
 import ToolEventCard from "../tools/ToolEventCard";
 import ToolGroupSummary from "../tools/ToolGroupSummary";
 import SubagentCard from "../agents/SubagentCard";
 import SkillBadge from "../agents/SkillBadge";
 
-function BlockRenderer({ block, isStreaming }) {
+const MarkdownContent = lazy(() => import("./MarkdownContent"));
+
+function BlockRenderer({ block, isStreaming, isUser }) {
   switch (block.type) {
     case "text":
-      return <MarkdownContent content={block.content} isStreaming={isStreaming} />;
+      if (isUser) {
+        return <p className="whitespace-pre-wrap leading-[1.7]">{block.content}</p>;
+      }
+      return (
+        <Suspense fallback={<p className="whitespace-pre-wrap leading-[1.7]">{block.content}</p>}>
+          <MarkdownContent content={block.content} isStreaming={isStreaming} />
+        </Suspense>
+      );
     case "tool":
       return <ToolEventCard tool={block} />;
     case "tool-group":
@@ -22,7 +31,7 @@ function BlockRenderer({ block, isStreaming }) {
   }
 }
 
-export default function MessageBubble({ message, isFirstInGroup, isLastInGroup }) {
+export default React.memo(function MessageBubble({ message, isFirstInGroup, isLastInGroup }) {
   const { role, blocks, _streaming, _aborted } = message;
   const isUser = role === "user";
 
@@ -59,6 +68,7 @@ export default function MessageBubble({ message, isFirstInGroup, isLastInGroup }
           <BlockRenderer
             key={`${message.id}-b${i}`}
             block={block}
+            isUser={isUser}
             isStreaming={_streaming && i === blocks.length - 1 && block.type === "text"}
           />
         ))}
@@ -69,4 +79,4 @@ export default function MessageBubble({ message, isFirstInGroup, isLastInGroup }
       </div>
     </div>
   );
-}
+});

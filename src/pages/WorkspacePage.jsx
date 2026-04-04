@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { createSession, listSessions, sendPrompt } from "../api";
+import { createSession, listSessions } from "../api";
 
 const quickActions = [
   { icon: "folder_open", label: "Organize my files" },
@@ -49,8 +49,9 @@ export default function WorkspacePage() {
     try {
       const session = await createSession();
       const sessionId = session.id;
-      await sendPrompt(sessionId, prompt.trim());
-      navigate(`/session?id=${sessionId}`);
+      navigate(`/session?id=${sessionId}`, {
+        state: { initialPrompt: prompt.trim() },
+      });
     } catch (err) {
       console.error("Failed to create session:", err);
       setError(formatSessionStartError(err));
@@ -113,11 +114,9 @@ export default function WorkspacePage() {
                 <span className="material-symbols-outlined">help_outline</span>
               </button>
               <div className="ml-2 h-10 w-10 overflow-hidden rounded-full border border-outline-variant/20">
-                <img
-                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuDMDUC4BdA_HMJbJjK-1VaVbYVKUgD_T-DEnxvPIRqHq8OSzCRiQIe6-f25HxLqS15kOJBgVp_smvTRtNxWEoOqVIBxOLZLmBerHV13V-2UfLlDDS-WiISWZ4so6zNYzKRhE_aKnhncOF0hxW1lcYWuvlZpmGYFZ3CZ170YJjt0Pi7STzAFMwtwmCiYvKCKszG_E2Ebm7vT9GYcScu4um0Z3lFJfNIyMoukJ3UJ9UaDUZ_saVM3DG1ck8I9ZMK9qkFKR_lAO53MSxg"
-                  alt="User profile"
-                  className="h-full w-full object-cover"
-                />
+                <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary/15 to-primary/30 text-sm font-semibold text-primary">
+                  CW
+                </div>
               </div>
             </div>
           </div>
@@ -136,13 +135,36 @@ export default function WorkspacePage() {
             </div>
 
             <div className="relative aspect-video w-full max-w-md">
-              <div className="absolute inset-0 -rotate-2 scale-105 rounded-xl bg-surface-container-low opacity-50" />
-              <div className="absolute inset-0 flex rotate-1 scale-100 items-center justify-center overflow-hidden rounded-xl bg-surface-container-high">
-                <img
-                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuDessI1RvJkFg6Fi6D4EuzCw2ld2QgQTYxLzEzmLy-pVL1LaL5CmAQrD83_tnjkGjd0JD4Wajn_jvyvq-ypCpUaIVOi6nJR-7HuwhuAeicO0ii_aKdRY-r5WDk2olJv8IMi2pdyeErW3W7WxNcFxey8h6AP3JKB7J82eouACIfXti6ANq_NeW0ZLMBWBj03L3CtTiLJAagB_mqOvjnKSjkZjBffrt_YkAmlh6RExy0_Cg99yNNZjiuEvutbaLt5YRI9F0qlJhsGZ2E"
-                  alt="Serene workspace"
-                  className="h-full w-full object-cover opacity-40 mix-blend-multiply"
-                />
+              <div className="absolute inset-0 -rotate-2 scale-105 rounded-xl bg-gradient-to-br from-primary/10 via-transparent to-secondary/10 opacity-70" />
+              <div className="absolute inset-0 rotate-1 scale-100 overflow-hidden rounded-xl border border-outline-variant/20 bg-[radial-gradient(circle_at_top,_rgba(217,119,87,0.22),_transparent_45%),linear-gradient(135deg,rgba(255,255,255,0.9),rgba(244,243,241,0.95))]">
+                <div className="flex h-full w-full flex-col justify-between p-6 text-left">
+                  <div className="flex items-center justify-between">
+                    <span className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-primary">
+                      Operator Console
+                    </span>
+                    <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-700">
+                      Ready
+                    </span>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="h-3 w-2/3 rounded-full bg-primary/20" />
+                    <div className="h-3 w-1/2 rounded-full bg-secondary/20" />
+                    <div className="grid grid-cols-3 gap-3 pt-2">
+                      <div className="rounded-2xl bg-white/80 p-3 shadow-sm">
+                        <p className="text-xs text-muted-foreground">Files</p>
+                        <p className="mt-1 text-lg font-semibold text-on-surface">24</p>
+                      </div>
+                      <div className="rounded-2xl bg-white/80 p-3 shadow-sm">
+                        <p className="text-xs text-muted-foreground">Reports</p>
+                        <p className="mt-1 text-lg font-semibold text-on-surface">8</p>
+                      </div>
+                      <div className="rounded-2xl bg-white/80 p-3 shadow-sm">
+                        <p className="text-xs text-muted-foreground">Tasks</p>
+                        <p className="mt-1 text-lg font-semibold text-on-surface">5</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </section>
