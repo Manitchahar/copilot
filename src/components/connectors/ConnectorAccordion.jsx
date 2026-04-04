@@ -25,42 +25,45 @@ export default function ConnectorAccordion({
   const panelId = `accordion-panel-${id}`;
 
   return (
-    <div className="rounded-[1rem] border border-outline-variant/20 bg-surface-container-low overflow-hidden">
+    <div className="rounded-[1rem] border border-border/20 bg-card overflow-hidden">
       <h3>
-        <button
-          id={headerId}
-          aria-expanded={open}
-          aria-controls={panelId}
-          onClick={() => setOpen(!open)}
-          className="flex w-full cursor-pointer items-center gap-3 px-5 py-4 transition-colors hover:bg-surface-container-high/50"
-        >
-          <span className={cn("material-symbols-outlined text-sm text-on-surface/40 transition-transform duration-200", open && "rotate-180")}>
-            expand_more
-          </span>
-          <span className="material-symbols-outlined text-[18px] text-secondary">{icon}</span>
-          <span className="font-label text-sm font-semibold uppercase tracking-wide text-on-surface">{label}</span>
-          <span className="sr-only">, {count} {count === 1 ? "item" : "items"}</span>
-          {count > 0 && (
-            <Badge variant="secondary" className="h-auto px-2 py-0.5 text-[11px]">
-              {countLabel || count}
-            </Badge>
-          )}
+        <div className="flex w-full items-center gap-3 px-5 py-4 transition-colors hover:bg-muted/50">
+          <button
+            id={headerId}
+            aria-expanded={open}
+            aria-controls={panelId}
+            onClick={() => setOpen(!open)}
+            className="flex flex-1 cursor-pointer items-center gap-3"
+          >
+            <span className={cn("material-symbols-outlined text-sm text-muted-foreground transition-transform duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)]", open && "rotate-180")}>
+              expand_more
+            </span>
+            <span className="material-symbols-outlined text-[18px] text-muted-foreground">{icon}</span>
+            <span className="text-sm font-semibold uppercase tracking-wide text-foreground">{label}</span>
+            <span className="sr-only">, {count} {count === 1 ? "item" : "items"}</span>
+            {count > 0 && (
+              <Badge variant="secondary" className="h-auto px-2 py-0.5 text-[11px]">
+                {countLabel || count}
+              </Badge>
+            )}
+          </button>
           <span className="flex-1" />
           {onAdd && (
-            <Button variant="link" size="xs" onClick={(e) => { e.stopPropagation(); if (!open) setOpen(true); onAdd(); }} className="h-auto p-0" aria-label={`Add ${label}`}>
+            <Button variant="link" size="xs" onClick={() => { if (!open) setOpen(true); onAdd(); }} className="h-auto p-0" aria-label={`Add ${label}`}>
               + Add
             </Button>
           )}
-        </button>
+        </div>
       </h3>
       <div
         id={panelId}
         role="region"
         aria-labelledby={headerId}
+        aria-hidden={!open}
         style={{ maxHeight: open ? `${bodyHeight + 20}px` : "0px" }}
         className="overflow-hidden transition-all duration-200 ease-out"
       >
-        <div ref={bodyRef} className="border-t border-outline-variant/10 px-5 pb-4 pt-3">
+        <div ref={bodyRef} className="border-t border-border/10 px-5 pb-4 pt-3">
           {children}
         </div>
       </div>

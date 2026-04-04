@@ -3,17 +3,20 @@ import { Link, useSearchParams } from "react-router-dom";
 import {
   abortTurn,
   connectEvents,
+  getHistory,
   getSession,
   sendApproval,
   sendPrompt,
   sendUserInput,
+  uploadAttachments,
 } from "../api";
-import { createInitialState, processEvent } from "../lib/blockBuilder";
+import { createInitialState, hydrateStateFromHistory, processEvent } from "../lib/blockBuilder";
 import MessageList from "../components/chat/MessageList";
 import ChatInput from "../components/chat/ChatInput";
 import PermissionCard from "../components/tools/PermissionCard";
 import MCPStatusPanel from "../components/agents/MCPStatusPanel";
 import ConnectorsPanel from "../components/connectors/ConnectorsPanel";
+import useConnectorConfig from "../hooks/useConnectorConfig";
 
 // ── Sidebar nav items ────────────────────────────────────
 const sidebarItems = [
@@ -78,6 +81,10 @@ function summariseEvent(type, data = {}) {
       return "Skills loaded";
     case "mcp_loaded":
       return "MCP servers loaded";
+    case "prompt_queued":
+      return data.prompt ? `Queued: ${trimStatusText(data.prompt, 80)}` : "Prompt queued";
+    case "prompt_steered":
+      return data.prompt ? `Steer next: ${trimStatusText(data.prompt, 80)}` : "Priority prompt queued";
     default:
       return type.replaceAll("_", " ");
   }
@@ -112,9 +119,35 @@ function statusToneClasses(tone) {
   }
 }
 
+function formatBytes(bytes = 0) {
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  return `${value >= 10 || index === 0 ? Math.round(value) : value.toFixed(1)} ${units[index]}`;
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      const [, base64] = result.split(",", 2);
+      resolve(base64 || "");
+    };
+    reader.onerror = () => reject(reader.error || new Error(`Failed to read ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function ActiveSessionPage() {
   const [searchParams] = useSearchParams();
   const sessionId = searchParams.get("id");
+  const resumeRequested = searchParams.get("resume") === "1";
 
   // Chat state
   const [msgState, setMsgState] = useState(createInitialState);
@@ -126,12 +159,21 @@ export default function ActiveSessionPage() {
   const [statusText, setStatusText] = useState("Connecting to session");
   const [statusTone, setStatusTone] = useState("ready");
   const [activityLog, setActivityLog] = useState([]);
+  const [sessionTitle, setSessionTitle] = useState("Untitled session");
   const [sessionMeta, setSessionMeta] = useState({
     engine: "copilot-sdk",
     model: "unknown",
     provider: "copilot-sdk-default",
     approval_mode: "permission",
   });
+  const [runtimeStats, setRuntimeStats] = useState({
+    totalTokens: 0,
+    contextUsage: { used: 0, total: 0 },
+  });
+  const [sendMode, setSendMode] = useState("run");
+  const [queuedPrompts, setQueuedPrompts] = useState([]);
+  const [draftAttachments, setDraftAttachments] = useState([]);
+  const [isUploading, setIsUploading] = useState(false);
 
   // Sidebar state (populated from events)
   const [activeTools, setActiveTools] = useState([]); // running tool names
@@ -143,11 +185,23 @@ export default function ActiveSessionPage() {
   const [queryCount, setQueryCount] = useState(0);
   const [currentFile, setCurrentFile] = useState(null);
   const [activeView, setActiveView] = useState("chat"); // "chat" | "connectors"
+  const connectorConfig = useConnectorConfig();
+
+  function handleViewChange(viewId) {
+    if (activeView === "connectors" && connectorConfig.dirty) {
+      if (!window.confirm("You have unsaved connector changes. Discard them?")) return;
+      connectorConfig.reset();
+    }
+    setActiveView(viewId);
+  }
 
   // Pending approval / input requests
   const [pendingRequests, setPendingRequests] = useState([]); // { request_id, kind, payload }
 
   const wsRef = useRef(null);
+  const reconnectTimerRef = useRef(null);
+  const reconnectAttemptRef = useRef(0);
+  const manualCloseRef = useRef(false);
 
   useEffect(() => {
     document.title = "Cloud Cowork Active Session";
@@ -258,9 +312,111 @@ export default function ActiveSessionPage() {
     setQueryCount(0);
     setCurrentFile(null);
     setPendingRequests([]);
+    setQueuedPrompts([]);
+    setDraftAttachments([]);
+    setIsUploading(false);
+    setSessionTitle("Untitled session");
+    setRuntimeStats({ totalTokens: 0, contextUsage: { used: 0, total: 0 } });
     setStatusText("Connecting to session");
     setStatusTone("ready");
     setActivityLog([]);
+  }, []);
+
+  const applySessionData = useCallback(
+    (snap, history, options = {}) => {
+      const { isReconnect = false } = options;
+      setBusy(Boolean(snap.busy));
+      setPendingRequests(snap.pending_requests || []);
+      setQueuedPrompts(snap.queued_prompts || []);
+      if (snap.runtime) {
+        setSessionMeta(snap.runtime);
+      }
+      if (snap.title) {
+        setSessionTitle(snap.title);
+      }
+      setRuntimeStats({
+        totalTokens: snap.total_tokens || 0,
+        contextUsage: snap.context_usage || { used: 0, total: 0 },
+      });
+      if (history?.messages?.length) {
+        setMsgState(hydrateStateFromHistory(history.messages));
+      } else if (isReconnect) {
+        setMsgState(createInitialState());
+      }
+      if (isReconnect) {
+        setActiveTools([]);
+        setActiveSubagents([]);
+        setStatusTone(snap.busy ? "working" : "ready");
+        setStatusText(snap.busy ? "Reconnected to live session" : "Reconnected and synced");
+      } else if (snap.recent_events?.length) {
+        const lastEvent = snap.recent_events[snap.recent_events.length - 1];
+        setStatusText(
+          resumeRequested && !snap.busy
+            ? "Resumed existing session"
+            : summariseEvent(lastEvent.type, lastEvent.data)
+        );
+      } else if (resumeRequested) {
+        setStatusText("Resumed existing session");
+      }
+    },
+    [resumeRequested]
+  );
+
+  const loadSessionData = useCallback(
+    async (options = {}) => {
+      if (!sessionId) return null;
+      const [snap, history] = await Promise.all([getSession(sessionId), getHistory(sessionId)]);
+      applySessionData(snap, history, options);
+      return { snap, history };
+    },
+    [applySessionData, sessionId]
+  );
+
+  const handleAttachFiles = useCallback(
+    async (files) => {
+      if (!files?.length) return;
+      setIsUploading(true);
+      setError(null);
+      try {
+        const payload = await Promise.all(
+          files.map(async (file) => ({
+            name: file.name,
+            data: await fileToBase64(file),
+            media_type: file.type || "application/octet-stream",
+            relative_path: file.webkitRelativePath || file.name,
+          }))
+        );
+        const response = await uploadAttachments(payload);
+        const nextAttachments = (response.attachments || []).map((attachment, index) => {
+          const file = files[index];
+          return {
+            id: `${attachment.path}-${Date.now()}-${index}`,
+            name: attachment.name || file?.name || "attachment",
+            media_type: attachment.media_type || file?.type || null,
+            sizeLabel: formatBytes(file?.size || response.files?.[index]?.size || 0),
+            attachment,
+          };
+        });
+        setDraftAttachments((prev) => [...prev, ...nextAttachments]);
+        setStatusTone("ready");
+        setStatusText(
+          nextAttachments.length === 1
+            ? `Attached ${nextAttachments[0].name}`
+            : `Attached ${nextAttachments.length} files`
+        );
+      } catch (err) {
+        setError(err.message || "Could not upload attachments");
+        setStatusTone("error");
+        setStatusText("Attachment upload failed");
+      } finally {
+        setIsUploading(false);
+      }
+    },
+    []
+  );
+
+  const handleRemoveAttachment = useCallback((attachmentId) => {
+    setDraftAttachments((prev) => prev.filter((item) => item.id !== attachmentId));
   }, []);
 
   // ── WebSocket connection ───────────────────────────────
@@ -270,294 +426,371 @@ export default function ActiveSessionPage() {
 
     let cancelled = false;
 
-    // Load initial snapshot
-    getSession(sessionId)
-      .then((snap) => {
+    manualCloseRef.current = false;
+    reconnectAttemptRef.current = 0;
+    clearTimeout(reconnectTimerRef.current);
+    reconnectTimerRef.current = null;
+
+    const scheduleReconnect = () => {
+      if (cancelled || manualCloseRef.current) return;
+      if (reconnectTimerRef.current) return;
+      reconnectAttemptRef.current += 1;
+      const attempt = reconnectAttemptRef.current;
+      const delay = Math.min(1000 * 2 ** (attempt - 1), 8000);
+      setConnected(false);
+      setStatusTone("blocked");
+      setStatusText(
+        attempt === 1
+          ? "Reconnecting to live session…"
+          : `Reconnecting to live session… (${attempt})`
+      );
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = setTimeout(() => {
+        reconnectTimerRef.current = null;
+        connectSocket(true);
+      }, delay);
+    };
+
+    const connectSocket = (isReconnect = false) => {
+      if (cancelled) return;
+      const connection = connectEvents(sessionId, { replayRecent: false });
+      const { socket } = connection;
+      wsRef.current = connection;
+
+      socket.onopen = async () => {
         if (cancelled) return;
-        setBusy(snap.busy);
-        setPendingRequests(snap.pending_requests || []);
-        if (snap.runtime) {
-          setSessionMeta(snap.runtime);
+        setConnected(true);
+        setError(null);
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+        if (isReconnect || reconnectAttemptRef.current > 0) {
+          try {
+            await loadSessionData({ isReconnect: true });
+          } catch {
+            setStatusTone("blocked");
+            setStatusText("Live connection restored, waiting to resync");
+          }
+        } else {
+          setStatusTone("ready");
+          setStatusText("Connected to live session");
         }
-        if (snap.recent_events?.length) {
-          const lastEvent = snap.recent_events[snap.recent_events.length - 1];
-          setStatusText(summariseEvent(lastEvent.type, lastEvent.data));
+        reconnectAttemptRef.current = 0;
+      };
+
+      socket.onclose = () => {
+        if (cancelled || manualCloseRef.current) return;
+        scheduleReconnect();
+      };
+
+      socket.onerror = () => {
+        if (cancelled || manualCloseRef.current) return;
+        setError("WebSocket connection lost");
+        scheduleReconnect();
+      };
+
+      socket.onmessage = (e) => {
+        if (cancelled) return;
+
+        let evt;
+        try {
+          evt = JSON.parse(e.data);
+        } catch {
+          return;
         }
-      })
+        const { type, data } = evt;
+
+        switch (type) {
+          case "session_started":
+            if (data?.runtime) {
+              setSessionMeta(data.runtime);
+            }
+            setStatusTone("ready");
+            setStatusText("Session ready");
+            appendActivity(type, data);
+            break;
+
+          case "title_changed":
+            if (data?.title) {
+              setSessionTitle(data.title);
+              appendActivity(type, data);
+            }
+            break;
+
+          case "usage_stats":
+            setRuntimeStats((prev) => ({
+              ...prev,
+              totalTokens: data.total_tokens ?? prev.totalTokens ?? 0,
+            }));
+            break;
+
+          case "context_changed":
+            setRuntimeStats((prev) => ({
+              ...prev,
+              contextUsage: {
+                used: data.used || 0,
+                total: data.total || 0,
+              },
+            }));
+            break;
+
+          case "turn_started":
+            setBusy(true);
+            setLastTurnError(null);
+            setStatusTone("working");
+            setStatusText(summariseEvent(type, data));
+            appendActivity(type, data, "working");
+            setMsgState((prev) => processEvent(prev, type, data));
+            if (data?.prompt) {
+              setQueryCount((c) => c + 1);
+            }
+            break;
+
+          case "assistant_delta":
+            setStatusTone("working");
+            setStatusText("Writing response");
+            setMsgState((prev) => processEvent(prev, type, data));
+            break;
+
+          case "assistant_message":
+            if (data?.content) {
+              setStatusTone("ready");
+              setStatusText("Response received");
+              appendActivity(type, data);
+              setMsgState((prev) => processEvent(prev, type, data));
+            }
+            break;
+
+          case "tool_start":
+            setStatusTone("working");
+            setStatusText(summariseEvent(type, data));
+            appendActivity(type, data, "working");
+            setActiveTools((prev) => [
+              ...prev,
+              { id: data.tool_call_id, name: data.tool_name },
+            ]);
+            setMsgState((prev) => processEvent(prev, type, data));
+            break;
+
+          case "tool_output":
+          case "tool_progress":
+            setStatusTone("working");
+            setStatusText(summariseEvent(type, data));
+            appendActivity(type, data, "working");
+            setMsgState((prev) => processEvent(prev, type, data));
+            break;
+
+          case "tool_complete":
+            setStatusTone(data.success === false ? "error" : "working");
+            setStatusText(summariseEvent(type, data));
+            appendActivity(type, data, data.success === false ? "error" : "ready");
+            if (data.error_text) {
+              setLastTurnError(data.error_text);
+              setError(data.error_text);
+            }
+            setActiveTools((prev) => prev.filter((t) => t.id !== data.tool_call_id));
+            processToolComplete(data);
+            setMsgState((prev) => processEvent(prev, type, data));
+            break;
+
+          case "prompt_queued":
+            setQueuedPrompts((prev) => [
+              ...prev,
+              {
+                id: data.id,
+                prompt: data.prompt,
+                mode: data.mode,
+                attachment_count: data.attachment_count || 0,
+              },
+            ]);
+            setStatusTone("blocked");
+            setStatusText(`Queued: ${trimStatusText(data.prompt, 80)}`);
+            appendActivity(type, data, "blocked");
+            break;
+
+          case "prompt_steered":
+            setQueuedPrompts((prev) => [
+              {
+                id: data.id,
+                prompt: data.prompt,
+                mode: data.mode,
+                attachment_count: data.attachment_count || 0,
+              },
+              ...prev,
+            ]);
+            setStatusTone("working");
+            setStatusText(`Steer next: ${trimStatusText(data.prompt, 80)}`);
+            appendActivity(type, data, "working");
+            break;
+
+          case "permission_requested":
+            setStatusTone("blocked");
+            setStatusText(summariseEvent(type, data));
+            appendActivity(type, data, "blocked");
+            enqueuePendingRequest({
+              request_id: data.request_id,
+              kind: "permission",
+              payload: data,
+            });
+            break;
+
+          case "permission_decision":
+            setStatusTone(data.decision?.includes("denied") ? "error" : "working");
+            setStatusText(summariseEvent(type, data));
+            appendActivity(type, data, data.decision?.includes("denied") ? "error" : "ready");
+            if (data.decision?.includes("denied")) {
+              setLastTurnError("Permission denied");
+            }
+            break;
+
+          case "input_requested":
+            setStatusTone("blocked");
+            setStatusText(summariseEvent(type, data));
+            appendActivity(type, data, "blocked");
+            enqueuePendingRequest({
+              request_id: data.request_id,
+              kind: "user_input",
+              payload: data,
+            });
+            break;
+
+          case "input_notice":
+            setStatusTone("blocked");
+            setStatusText(summariseEvent(type, data));
+            appendActivity(type, data, "blocked");
+            break;
+
+          case "input_received":
+            setStatusTone("working");
+            setStatusText("Input received");
+            appendActivity(type, data);
+            break;
+
+          case "turn_retry":
+            setStatusTone("working");
+            setStatusText(summariseEvent(type, data));
+            appendActivity(type, data, "working");
+            break;
+
+          case "turn_complete":
+            setBusy(false);
+            setQueuedPrompts((prev) => prev.slice(1));
+            setMsgState((prev) => processEvent(prev, type, data));
+            if (data?.error) {
+              setLastTurnError(data.error);
+              setError(data.error);
+              setStatusTone("error");
+              setStatusText("Run stopped with an error");
+              appendActivity(type, data, "error");
+            } else {
+              setStatusTone("ready");
+              setStatusText("Run completed");
+              appendActivity(type, data);
+            }
+            break;
+
+          case "turn_aborted":
+            setBusy(false);
+            setStatusTone("ready");
+            setStatusText("Turn cancelled");
+            appendActivity(type, data);
+            setMsgState((prev) => processEvent(prev, type, data));
+            break;
+
+          case "session_error":
+            setError(data?.message || "An error occurred");
+            setLastTurnError(data?.message || "An error occurred");
+            setStatusTone("error");
+            setStatusText("Session error");
+            appendActivity(type, data, "error");
+            break;
+
+          case "subagent_started":
+            setActiveSubagents((prev) => [
+              ...prev,
+              { id: data.agent_id, name: data.agent_name || data.agent_id, status: "running" },
+            ]);
+            setStatusText(summariseEvent(type, data));
+            setStatusTone("working");
+            appendActivity(type, data, "working");
+            setMsgState((s) => processEvent(s, type, data));
+            break;
+
+          case "subagent_completed":
+            setActiveSubagents((prev) =>
+              prev.map((a) => (a.id === data.agent_id ? { ...a, status: "completed" } : a))
+            );
+            setStatusText(summariseEvent(type, data));
+            appendActivity(type, data, "ready");
+            setMsgState((s) => processEvent(s, type, data));
+            break;
+
+          case "subagent_failed":
+            setActiveSubagents((prev) =>
+              prev.map((a) =>
+                a.id === data.agent_id ? { ...a, status: "failed", error: data.error } : a
+              )
+            );
+            setStatusText(summariseEvent(type, data));
+            setStatusTone("error");
+            appendActivity(type, data, "error");
+            setMsgState((s) => processEvent(s, type, data));
+            break;
+
+          case "skill_invoked":
+            setLoadedSkills((prev) => {
+              const name = data.skill_name;
+              if (prev.includes(name)) return prev;
+              return [...prev, name];
+            });
+            setStatusText(summariseEvent(type, data));
+            appendActivity(type, data, "working");
+            setMsgState((s) => processEvent(s, type, data));
+            break;
+
+          case "skills_loaded":
+            if (data.skills && data.skills.length > 0) {
+              setLoadedSkills(data.skills);
+            }
+            appendActivity(type, data, "ready");
+            break;
+
+          case "mcp_loaded":
+            setMcpStatus({ loaded: true, servers: data.servers || [] });
+            appendActivity(type, data, "ready");
+            break;
+
+          default:
+            break;
+        }
+      };
+    };
+
+    loadSessionData()
       .catch(() => {
         if (!cancelled) {
           setError("Failed to load session");
           setStatusTone("error");
           setStatusText("Could not load this session");
         }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          connectSocket(false);
+        }
       });
-
-    const { socket, close } = connectEvents(sessionId);
-    wsRef.current = socket;
-
-    socket.onopen = () => {
-      if (!cancelled) {
-        setConnected(true);
-        setStatusTone("ready");
-        setStatusText("Connected to live session");
-      }
-    };
-    socket.onclose = () => {
-      if (!cancelled) {
-        setConnected(false);
-        setStatusTone("error");
-        setStatusText("Live connection closed");
-      }
-    };
-    socket.onerror = () => {
-      if (!cancelled) {
-        setError("WebSocket connection lost");
-        setStatusTone("error");
-        setStatusText("Live connection lost");
-      }
-    };
-
-    socket.onmessage = (e) => {
-      if (cancelled) return;
-
-      let evt;
-      try {
-        evt = JSON.parse(e.data);
-      } catch {
-        return;
-      }
-      const { type, data } = evt;
-
-      switch (type) {
-        case "session_started":
-          if (data?.runtime) {
-            setSessionMeta(data.runtime);
-          }
-          setStatusTone("ready");
-          setStatusText("Session ready");
-          appendActivity(type, data);
-          break;
-
-        case "turn_started":
-          setBusy(true);
-          setLastTurnError(null);
-          setStatusTone("working");
-          setStatusText(summariseEvent(type, data));
-          appendActivity(type, data, "working");
-          setMsgState((prev) => processEvent(prev, type, data));
-          if (data?.prompt) {
-            setQueryCount((c) => c + 1);
-          }
-          break;
-
-        case "assistant_delta": {
-          setStatusTone("working");
-          setStatusText("Writing response");
-          setMsgState((prev) => processEvent(prev, type, data));
-          break;
-        }
-
-        case "assistant_message":
-          if (data?.content) {
-            setStatusTone("ready");
-            setStatusText("Response received");
-            appendActivity(type, data);
-            setMsgState((prev) => processEvent(prev, type, data));
-          }
-          break;
-
-        case "tool_start":
-          setStatusTone("working");
-          setStatusText(summariseEvent(type, data));
-          appendActivity(type, data, "working");
-          setActiveTools((prev) => [
-            ...prev,
-            { id: data.tool_call_id, name: data.tool_name },
-          ]);
-          setMsgState((prev) => processEvent(prev, type, data));
-          break;
-
-        case "tool_output":
-          setStatusTone("working");
-          setStatusText(summariseEvent(type, data));
-          appendActivity(type, data, "working");
-          setMsgState((prev) => processEvent(prev, type, data));
-          break;
-
-        case "tool_progress":
-          setStatusTone("working");
-          setStatusText(summariseEvent(type, data));
-          appendActivity(type, data, "working");
-          setMsgState((prev) => processEvent(prev, type, data));
-          break;
-
-        case "tool_complete":
-          setStatusTone(data.success === false ? "error" : "working");
-          setStatusText(summariseEvent(type, data));
-          appendActivity(type, data, data.success === false ? "error" : "ready");
-          if (data.error_text) {
-            setLastTurnError(data.error_text);
-            setError(data.error_text);
-          }
-          setActiveTools((prev) =>
-            prev.filter((t) => t.id !== data.tool_call_id)
-          );
-          processToolComplete(data);
-          setMsgState((prev) => processEvent(prev, type, data));
-          break;
-
-        case "permission_requested":
-          setStatusTone("blocked");
-          setStatusText(summariseEvent(type, data));
-          appendActivity(type, data, "blocked");
-          enqueuePendingRequest({
-            request_id: data.request_id,
-            kind: "permission",
-            payload: data,
-          });
-          break;
-
-        case "permission_decision":
-          setStatusTone(data.decision?.includes("denied") ? "error" : "working");
-          setStatusText(summariseEvent(type, data));
-          appendActivity(type, data, data.decision?.includes("denied") ? "error" : "ready");
-          if (data.decision?.includes("denied")) {
-            setLastTurnError("Permission denied");
-          }
-          break;
-
-        case "input_requested":
-          setStatusTone("blocked");
-          setStatusText(summariseEvent(type, data));
-          appendActivity(type, data, "blocked");
-          enqueuePendingRequest({
-            request_id: data.request_id,
-            kind: "user_input",
-            payload: data,
-          });
-          break;
-
-        case "input_notice":
-          setStatusTone("blocked");
-          setStatusText(summariseEvent(type, data));
-          appendActivity(type, data, "blocked");
-          break;
-
-        case "input_received":
-          setStatusTone("working");
-          setStatusText("Input received");
-          appendActivity(type, data);
-          break;
-
-        case "turn_retry":
-          setStatusTone("working");
-          setStatusText(summariseEvent(type, data));
-          appendActivity(type, data, "working");
-          break;
-
-        case "turn_complete":
-          setBusy(false);
-          setMsgState((prev) => processEvent(prev, type, data));
-          if (data?.error) {
-            setLastTurnError(data.error);
-            setError(data.error);
-            setStatusTone("error");
-            setStatusText("Run stopped with an error");
-            appendActivity(type, data, "error");
-          } else {
-            setStatusTone("ready");
-            setStatusText("Run completed");
-            appendActivity(type, data);
-          }
-          break;
-
-        case "turn_aborted":
-          setBusy(false);
-          setStatusTone("ready");
-          setStatusText("Turn cancelled");
-          appendActivity(type, data);
-          setMsgState((prev) => processEvent(prev, type, data));
-          break;
-
-        case "session_error":
-          setError(data?.message || "An error occurred");
-          setLastTurnError(data?.message || "An error occurred");
-          setStatusTone("error");
-          setStatusText("Session error");
-          appendActivity(type, data, "error");
-          break;
-
-        case "subagent_started": {
-          setActiveSubagents((prev) => [
-            ...prev,
-            { id: data.agent_id, name: data.agent_name || data.agent_id, status: "running" },
-          ]);
-          setStatusText(summariseEvent(type, data));
-          setStatusTone("working");
-          appendActivity(type, data, "working");
-          setMsgState((s) => processEvent(s, type, data));
-          break;
-        }
-
-        case "subagent_completed": {
-          setActiveSubagents((prev) =>
-            prev.map((a) => a.id === data.agent_id ? { ...a, status: "completed" } : a)
-          );
-          setStatusText(summariseEvent(type, data));
-          appendActivity(type, data, "ready");
-          setMsgState((s) => processEvent(s, type, data));
-          break;
-        }
-
-        case "subagent_failed": {
-          setActiveSubagents((prev) =>
-            prev.map((a) => a.id === data.agent_id ? { ...a, status: "failed", error: data.error } : a)
-          );
-          setStatusText(summariseEvent(type, data));
-          setStatusTone("error");
-          appendActivity(type, data, "error");
-          setMsgState((s) => processEvent(s, type, data));
-          break;
-        }
-
-        case "skill_invoked": {
-          setLoadedSkills((prev) => {
-            const name = data.skill_name;
-            if (prev.includes(name)) return prev;
-            return [...prev, name];
-          });
-          setStatusText(summariseEvent(type, data));
-          appendActivity(type, data, "working");
-          setMsgState((s) => processEvent(s, type, data));
-          break;
-        }
-
-        case "skills_loaded": {
-          if (data.skills && data.skills.length > 0) {
-            setLoadedSkills(data.skills);
-          }
-          appendActivity(type, data, "ready");
-          break;
-        }
-
-        case "mcp_loaded": {
-          setMcpStatus({ loaded: true, servers: data.servers || [] });
-          appendActivity(type, data, "ready");
-          break;
-        }
-
-        default:
-          break;
-      }
-    };
 
     return () => {
       cancelled = true;
-      close();
+      manualCloseRef.current = true;
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+      wsRef.current?.close?.();
       wsRef.current = null;
     };
   }, [
+    applySessionData,
     enqueuePendingRequest,
+    loadSessionData,
     resetSessionState,
     sessionId,
     processToolComplete,
@@ -648,7 +881,7 @@ export default function ActiveSessionPage() {
                 : "mx-2 flex items-center gap-3 rounded-full px-6 py-3 text-secondary transition-colors hover:bg-surface-container-high cursor-pointer";
               if (item.id) {
                 return (
-                  <button key={item.label} onClick={() => setActiveView(item.id)} className={cls}>
+                  <button key={item.label} onClick={() => handleViewChange(item.id)} aria-current={isActive ? "true" : undefined} className={cls}>
                     {content}
                   </button>
                 );
@@ -721,7 +954,7 @@ export default function ActiveSessionPage() {
           <section className="flex flex-1 overflow-hidden">
             {activeView === "connectors" ? (
               <div className="flex-1 bg-background">
-                <ConnectorsPanel />
+                <ConnectorsPanel connectorConfig={connectorConfig} />
               </div>
             ) : (
             <>
@@ -777,13 +1010,33 @@ export default function ActiveSessionPage() {
               <ChatInput
                 value={inputText}
                 onChange={setInputText}
-                onSend={(text) => {
-                  sendPrompt(sessionId, text);
-                  setInputText("");
+                onSend={(text, mode) => {
+                  const outgoingAttachments = draftAttachments.map((item) => item.attachment);
+                  if (!text && outgoingAttachments.length === 0) return;
+                  const resolvedMode = busy && mode === "run" ? "enqueue" : mode;
+                  sendPrompt(sessionId, text, outgoingAttachments, resolvedMode)
+                    .then(() => {
+                      setInputText("");
+                      setDraftAttachments([]);
+                      if (busy && mode === "run") {
+                        setSendMode("enqueue");
+                      }
+                      setError(null);
+                    })
+                    .catch((err) => {
+                      setError(err.message || "Could not send prompt");
+                    });
                 }}
                 onAbort={() => abortTurn(sessionId)}
-                disabled={busy}
+                disabled={isUploading}
                 isBusy={busy}
+                sendMode={sendMode}
+                onSendModeChange={setSendMode}
+                queuedCount={queuedPrompts.length}
+                attachments={draftAttachments}
+                isUploading={isUploading}
+                onAttachFiles={handleAttachFiles}
+                onRemoveAttachment={handleRemoveAttachment}
               />
             </div>
 
@@ -809,6 +1062,12 @@ export default function ActiveSessionPage() {
                     <RuntimeRow label="Model" value={sessionMeta.model} />
                     <RuntimeRow label="Provider" value={sessionMeta.provider} />
                     <RuntimeRow label="Approvals" value={sessionMeta.approval_mode} />
+                    {sessionMeta.reasoning_effort && (
+                      <RuntimeRow label="Reasoning" value={sessionMeta.reasoning_effort} />
+                    )}
+                    {sessionMeta.working_directory && (
+                      <RuntimeRow label="Workdir" value={sessionMeta.working_directory} />
+                    )}
                     {sessionMeta.mcp_servers && sessionMeta.mcp_servers.length > 0 && (
                       <p className="text-xs text-secondary">
                         MCP: {sessionMeta.mcp_servers.join(", ")}
@@ -819,6 +1078,22 @@ export default function ActiveSessionPage() {
                         Agents: {sessionMeta.custom_agents.join(", ")}
                       </p>
                     )}
+                  </div>
+                </div>
+
+                <div className="mb-10">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h3 className="font-label text-[10px] font-bold uppercase tracking-widest text-secondary">
+                      Session
+                    </h3>
+                  </div>
+                  <div className="rounded-[1rem] border border-outline-variant/10 bg-surface p-4 shadow-sm">
+                    <p className="text-sm font-semibold text-on-surface">
+                      {sessionTitle}
+                    </p>
+                    <p className="mt-1 text-xs text-secondary">
+                      {connected ? "Live session connected" : "Waiting for live connection"}
+                    </p>
                   </div>
                 </div>
 
@@ -948,6 +1223,30 @@ export default function ActiveSessionPage() {
                   </div>
                 )}
 
+                {queuedPrompts.length > 0 && (
+                  <div className="mb-10">
+                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-secondary">
+                      Queued Work
+                    </h3>
+                    <div className="space-y-2">
+                      {queuedPrompts.map((prompt) => (
+                        <div
+                          key={prompt.id}
+                          className="rounded-[1rem] border border-amber-200 bg-amber-50 px-4 py-3 text-sm"
+                        >
+                          <p className="font-medium text-on-surface">
+                            {trimStatusText(prompt.prompt, 90)}
+                          </p>
+                          <p className="mt-1 text-xs text-secondary">
+                            {prompt.mode === "immediate" ? "Runs next after abort" : "Queued to run next"}
+                            {prompt.attachment_count ? ` • ${prompt.attachment_count} attachment(s)` : ""}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <MCPStatusPanel mcpStatus={mcpStatus} />
 
                 {activeSubagents.length > 0 && (
@@ -1032,6 +1331,24 @@ export default function ActiveSessionPage() {
                     </p>
                     <p className="text-[10px] uppercase tracking-tighter text-secondary">
                       Artifacts Created
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="font-newsreader text-xl font-bold text-primary">
+                      {runtimeStats.totalTokens}
+                    </p>
+                    <p className="text-[10px] uppercase tracking-tighter text-secondary">
+                      Total Tokens
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="font-newsreader text-xl font-bold text-primary">
+                      {runtimeStats.contextUsage.total
+                        ? `${Math.round((runtimeStats.contextUsage.used / runtimeStats.contextUsage.total) * 100)}%`
+                        : "0%"}
+                    </p>
+                    <p className="text-[10px] uppercase tracking-tighter text-secondary">
+                      Context Used
                     </p>
                   </div>
                 </div>

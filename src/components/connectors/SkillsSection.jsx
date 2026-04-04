@@ -19,6 +19,12 @@ export default function SkillsSection({
         </h3>
       </div>
 
+      {(!skillDirectories?.length && !disabledSkills?.length) && (
+        <p className="text-center text-xs text-muted-foreground py-2">
+          Skills load automatically from your project. Use these settings to add extra directories or disable specific skills.
+        </p>
+      )}
+
       {/* Skill Directories */}
       <div className="space-y-2">
         <Label htmlFor="skill-dirs">Skill Directories</Label>

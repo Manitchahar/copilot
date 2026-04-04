@@ -6,12 +6,11 @@ function resolveApiBase() {
 
   if (typeof window === "undefined") return "";
 
-  const { protocol, hostname, port } = window.location;
+  const { protocol, hostname } = window.location;
   const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1";
-  const isViteDevPort = port === "5173" || port === "4173";
 
-  // In local Vite dev, talk directly to the FastAPI server to avoid flaky WS proxying.
-  if (isLocalHost && isViteDevPort) {
+  // In local Vite dev, talk directly to the FastAPI server to avoid flaky proxying.
+  if (import.meta.env.DEV && isLocalHost) {
     return `${protocol}//${hostname}:8000`;
   }
 
@@ -41,9 +40,10 @@ export const getSession = (id) => request("GET", `/sessions/${id}`);
 export const deleteSession = (id) => request("DELETE", `/sessions/${id}`);
 
 // ── Prompt / Approvals / Input ───────────────────────────
-export const sendPrompt = (id, prompt, attachments = null) =>
+export const sendPrompt = (id, prompt, attachments = null, mode = "run") =>
   request("POST", `/sessions/${id}/prompt`, {
     prompt,
+    mode,
     ...(attachments ? { attachments } : {}),
   });
 
@@ -62,17 +62,21 @@ export const abortTurn = (id) =>
 export const getHistory = (id) =>
   request("GET", `/sessions/${id}/history`);
 
+export const uploadAttachments = (files) =>
+  request("POST", "/uploads", { files });
+
 // ── Connector Config ─────────────────────────────────────
 export const getConnectorConfig = () => request("GET", "/config/connectors");
 export const saveConnectorConfig = (config) => request("PUT", "/config/connectors", config);
 
 // ── WebSocket event stream ───────────────────────────────
-export function connectEvents(sessionId) {
+export function connectEvents(sessionId, options = {}) {
+  const replayRecent = options.replayRecent !== false;
   const wsBase = API_BASE
     ? API_BASE.replace(/^http/, "ws")
     : `ws://${window.location.host}`;
   const socket = new WebSocket(
-    `${wsBase}/sessions/${sessionId}/events`
+    `${wsBase}/sessions/${sessionId}/events?replay_recent=${replayRecent ? "1" : "0"}`
   );
   return {
     socket,

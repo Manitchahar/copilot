@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   Sheet,
   SheetContent,
@@ -12,9 +12,11 @@ import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import JsonEditor from "./JsonEditor";
 import McpServerForm from "./McpServerForm";
+import CustomAgentForm from "./CustomAgentForm";
 import {
   validateMcpLocal,
   validateMcpRemote,
+  validateCustomAgent,
 } from "../../lib/connectorValidation";
 
 const FORM_META = {
@@ -33,19 +35,20 @@ const FORM_META = {
     subtitle: "Define a custom agent with its own prompt and tools.",
     icon: "smart_toy",
   },
-  provider: {
-    title: "Provider",
-    subtitle: "Add an LLM provider connection.",
-    icon: "key",
-  },
-  skill: {
-    title: "Skill",
-    subtitle: "Register a reusable skill.",
-    icon: "bolt",
-  },
 };
 
 function defaultValues(formType) {
+  if (formType === "custom-agent") {
+    return {
+      name: "",
+      display_name: "",
+      description: "",
+      prompt: "",
+      tools: [],
+      mcp_servers: [],
+      infer: true,
+    };
+  }
   const mode = formType === "mcp-remote" ? "remote" : "local";
   return mode === "local"
     ? { name: "", command: "", args: [], env: {}, cwd: "", timeout: null, tools: [], _mode: "local" }
@@ -59,13 +62,17 @@ function cleanForSerialize(values) {
   if (!out.cwd) delete out.cwd;
   if (out.timeout == null) delete out.timeout;
   if (out.tools?.length === 0) delete out.tools;
+  if (out.mcp_servers?.length === 0) delete out.mcp_servers;
   if (out.args?.length === 0) delete out.args;
   if (out.env && Object.keys(out.env).length === 0) delete out.env;
   if (out.headers && Object.keys(out.headers).length === 0) delete out.headers;
   return out;
 }
 
-function validate(values, mode, existingNames) {
+function validate(values, formType, mode, existingNames) {
+  if (formType === "custom-agent") {
+    return validateCustomAgent(values, existingNames);
+  }
   return mode === "remote"
     ? validateMcpRemote(values, existingNames)
     : validateMcpLocal(values, existingNames);
@@ -93,7 +100,6 @@ export default function ConnectorFormSheet({
   const [tab, setTab] = useState("visual");
   const [jsonText, setJsonText] = useState("");
   const [jsonError, setJsonError] = useState(null);
-  const lastSyncRef = useRef(null);
 
   // Reset when sheet opens with new data
   useEffect(() => {
@@ -166,7 +172,7 @@ export default function ConnectorFormSheet({
       ? existingNames.filter((n) => n !== editData?.name)
       : existingNames;
 
-    const errs = isMcp ? validate(finalValues, mode, names) : [];
+    const errs = validate(finalValues, formType, mode, names);
     setErrors(errs);
     if (errs.length > 0) return;
 
@@ -229,7 +235,13 @@ export default function ConnectorFormSheet({
                   mode={mode}
                 />
               )}
-              {/* Future: custom-agent, provider, skill forms */}
+              {formType === "custom-agent" && (
+                <CustomAgentForm
+                  values={values}
+                  onChange={handleValuesChange}
+                  errors={errors}
+                />
+              )}
             </ScrollArea>
           </TabsContent>
 
@@ -249,11 +261,11 @@ export default function ConnectorFormSheet({
         {errors.length > 0 && tab === "visual" && (
           <div className="mx-6 mb-2 flex items-center gap-2 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
             <span className="material-symbols-outlined text-[16px]">
-              warning
+              error
             </span>
             {errors.length === 1
-              ? "Please fix the error above."
-              : `Please fix the ${errors.length} errors above.`}
+              ? "Fix the error above to continue"
+              : `Fix the ${errors.length} errors above to continue`}
           </div>
         )}
 

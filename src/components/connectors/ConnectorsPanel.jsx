@@ -1,5 +1,4 @@
 import { useState } from "react";
-import useConnectorConfig from "../../hooks/useConnectorConfig";
 import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import ConnectorAccordion from "./ConnectorAccordion";
@@ -9,7 +8,7 @@ import ConnectorFormSheet from "./ConnectorFormSheet";
 import SkillsSection from "./SkillsSection";
 import ProviderForm from "./ProviderForm";
 
-export default function ConnectorsPanel() {
+export default function ConnectorsPanel({ connectorConfig }) {
   const {
     draft,
     loading,
@@ -21,12 +20,15 @@ export default function ConnectorsPanel() {
     reset,
     addMcpServer,
     removeMcpServer,
+    updateMcpServer,
     addCustomAgent,
     removeCustomAgent,
+    updateCustomAgent,
     updateSkillDirectories,
     updateDisabledSkills,
+    updateProvider,
     setDraft,
-  } = useConnectorConfig();
+  } = connectorConfig;
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetFormType, setSheetFormType] = useState(null);
@@ -41,28 +43,44 @@ export default function ConnectorsPanel() {
   function handleSave(values) {
     if (sheetFormType === "mcp-local" || sheetFormType === "mcp-remote") {
       const { name, ...config } = values;
-      if (editData?.name && editData.name !== name) removeMcpServer(editData.name);
-      addMcpServer(name, config);
+      if (editData?.name) {
+        updateMcpServer(editData.name, name, config);
+      } else {
+        addMcpServer(name, config);
+      }
     } else if (sheetFormType === "custom-agent") {
-      if (editData?.name) removeCustomAgent(editData.name);
-      addCustomAgent(values);
+      if (editData?.name) {
+        updateCustomAgent(editData.name, values);
+      } else {
+        addCustomAgent(values);
+      }
     }
     setSheetOpen(false);
   }
 
+  function uniqueName(base, existingNames) {
+    let candidate = `${base}-copy`;
+    let i = 2;
+    while (existingNames.includes(candidate)) {
+      candidate = `${base}-copy-${i++}`;
+    }
+    return candidate;
+  }
+
   function duplicateMcp(name, server) {
-    const newName = `${name}-copy`;
+    const newName = uniqueName(name, Object.keys(draft?.mcp_servers || {}));
     addMcpServer(newName, { ...server });
   }
 
   function duplicateAgent(agent) {
-    addCustomAgent({ ...agent, name: `${agent.name}-copy` });
+    const newName = uniqueName(agent.name, (draft?.custom_agents || []).map(a => a.name));
+    addCustomAgent({ ...agent, name: newName, display_name: `${agent.display_name || agent.name} (copy)` });
   }
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <span className="material-symbols-outlined animate-spin text-[24px] text-muted-foreground">
+      <div role="status" aria-live="polite" className="flex h-full items-center justify-center">
+        <span className="material-symbols-outlined animate-spin text-[24px] text-muted-foreground" aria-hidden="true">
           progress_activity
         </span>
         <span className="ml-2 text-sm text-muted-foreground">Loading configuration…</span>
@@ -83,11 +101,15 @@ export default function ConnectorsPanel() {
         <div>
           <h1 className="text-lg font-semibold text-foreground">Connectors</h1>
           <p className="text-sm text-muted-foreground">
-            Configure MCP servers, agents, skills, and providers
+            MCP servers, agents, skills, and providers
           </p>
         </div>
         {lastSaved && !dirty && (
-          <p className="text-xs text-muted-foreground">
+          <p
+            key={lastSaved}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground animate-in fade-in-0 slide-in-from-right-2 duration-300"
+          >
+            <span className="material-symbols-outlined text-[14px] text-emerald-600">check_circle</span>
             Saved {new Date(lastSaved).toLocaleTimeString()}
           </p>
         )}
@@ -95,9 +117,9 @@ export default function ConnectorsPanel() {
 
       {/* Dirty bar */}
       {dirty && (
-        <div className="mx-6 mt-4 flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2">
-          <span className="material-symbols-outlined text-[18px] text-amber-600">warning</span>
-          <span className="flex-1 text-sm text-amber-800">Unsaved changes</span>
+        <div role="status" aria-live="polite" className="mx-6 mt-4 flex items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2">
+          <span className="material-symbols-outlined text-[18px] text-amber-700">warning</span>
+          <span className="flex-1 text-sm text-amber-800">You have unsaved changes</span>
           <Button variant="ghost" size="xs" onClick={reset}>
             Discard
           </Button>
@@ -109,8 +131,12 @@ export default function ConnectorsPanel() {
 
       {/* Error bar */}
       {error && (
-        <div className="mx-6 mt-4 rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-2 text-sm text-destructive">
-          {error}
+        <div role="alert" aria-live="assertive" className="mx-6 mt-4 flex items-center gap-2 rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-2 text-sm text-destructive">
+          <span className="material-symbols-outlined text-[18px]" aria-hidden="true">error</span>
+          <span className="flex-1">{error}</span>
+          <Button variant="ghost" size="xs" onClick={() => connectorConfig.load()}>
+            Retry
+          </Button>
         </div>
       )}
 
@@ -129,9 +155,9 @@ export default function ConnectorsPanel() {
             {mcpEntries.length === 0 ? (
               <ConnectorEmptyState
                 icon="dns"
-                title="No MCP servers configured"
-                description="Add an MCP server to extend your AI assistant with custom tools and data sources."
-                actionLabel="Add MCP Server"
+                title="No MCP servers yet"
+                description="Connect a local or remote server to give your assistant access to custom tools."
+                actionLabel="Add server"
                 onAction={() => openSheet("mcp-local")}
               />
             ) : (
@@ -168,9 +194,9 @@ export default function ConnectorsPanel() {
             {agents.length === 0 ? (
               <ConnectorEmptyState
                 icon="smart_toy"
-                title="No custom agents configured"
-                description="Define custom agents with their own prompts, tools, and behavior."
-                actionLabel="Add Custom Agent"
+                title="No custom agents yet"
+                description="Create specialists — agents with focused expertise that handle specific tasks your way."
+                actionLabel="Add agent"
                 onAction={() => openSheet("custom-agent")}
               />
             ) : (
@@ -214,10 +240,16 @@ export default function ConnectorsPanel() {
           </ConnectorAccordion>
 
           {/* Provider */}
-          <ConnectorAccordion id="provider" icon="key" label="Provider" count={draft?.provider?.type ? 1 : 0}>
+          <ConnectorAccordion
+            id="provider"
+            icon="cloud"
+            label="Provider"
+            count={draft?.provider?.type ? 1 : 0}
+            countLabel={draft?.provider?.type || undefined}
+          >
             <ProviderForm
-              values={draft?.provider || {}}
-              onChange={(val) => setDraft((prev) => ({ ...prev, provider: val }))}
+              values={draft?.provider || { label: "", type: "copilot", base_url: "", api_key: "", model: "" }}
+              onChange={(vals) => connectorConfig.updateProvider(vals)}
               errors={[]}
             />
           </ConnectorAccordion>

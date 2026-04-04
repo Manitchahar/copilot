@@ -64,6 +64,31 @@ export default function useConnectorConfig() {
       custom_agents: (prev.custom_agents || []).filter(a => a.name !== name),
     }));
   }
+  function updateCustomAgent(oldName, agent) {
+    setDraft(prev => ({
+      ...prev,
+      custom_agents: (prev.custom_agents || []).map(a =>
+        a.name === oldName ? agent : a
+      ),
+    }));
+  }
+  function updateMcpServer(oldName, newName, config) {
+    setDraft(prev => {
+      const servers = { ...prev.mcp_servers };
+      if (oldName !== newName) delete servers[oldName];
+      servers[newName] = config;
+      return { ...prev, mcp_servers: servers };
+    });
+  }
+  function updateProvider(provider) {
+    setDraft(prev => ({ ...prev, provider: provider }));
+  }
+  function clearProvider() {
+    setDraft(prev => {
+      const { provider, ...rest } = prev;
+      return rest;
+    });
+  }
 
   async function save() {
     setSaving(true);
@@ -88,9 +113,10 @@ export default function useConnectorConfig() {
   return {
     config, draft, loading, saving, error, dirty, lastSaved,
     load, save, reset,
-    updateMcpServers, addMcpServer, removeMcpServer,
+    updateMcpServers, addMcpServer, removeMcpServer, updateMcpServer,
     updateSkillDirectories, updateDisabledSkills,
-    updateCustomAgents, addCustomAgent, removeCustomAgent,
+    updateCustomAgents, addCustomAgent, removeCustomAgent, updateCustomAgent,
+    updateProvider, clearProvider,
     setDraft,
   };
 }

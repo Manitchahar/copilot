@@ -14,6 +14,8 @@ export default function JsonEditor({ value, onChange, error }) {
   return (
     <div className="relative">
       <Textarea
+        aria-label="JSON configuration editor"
+        aria-describedby={error ? "json-editor-error" : undefined}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         spellCheck={false}
@@ -23,8 +25,8 @@ export default function JsonEditor({ value, onChange, error }) {
         {copied ? "Copied!" : "Copy"}
       </Button>
       {error && (
-        <p className="mt-1.5 flex items-center gap-1 text-xs text-red-500">
-          <span className="material-symbols-outlined text-[14px]">error</span>
+        <p id="json-editor-error" role="alert" className="mt-1.5 flex items-center gap-1 text-xs text-destructive">
+          <span className="material-symbols-outlined text-[14px]" aria-hidden="true">error</span>
           {error}
         </p>
       )}

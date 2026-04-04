@@ -18,11 +18,11 @@ function FieldGroup({ children }) {
   return <div className="space-y-2">{children}</div>;
 }
 
-function FieldError({ message }) {
+function FieldError({ id, message }) {
   if (!message) return null;
   return (
-    <p className="flex items-center gap-1 text-sm text-destructive">
-      <span className="material-symbols-outlined text-[14px]">error</span>
+    <p id={id} role="alert" className="flex items-center gap-1 text-sm text-destructive">
+      <span className="material-symbols-outlined text-[14px]" aria-hidden="true">error</span>
       {message}
     </p>
   );
@@ -78,10 +78,11 @@ export default function McpServerForm({ values, onChange, errors, mode }) {
           value={values.name || ""}
           onChange={(e) => set("name", e.target.value)}
           placeholder="my-mcp-server"
+          aria-required="true"
           aria-invalid={!!hasError(errors, "name")}
-          aria-describedby="mcp-name-error"
+          aria-describedby={hasError(errors, "name") ? "mcp-name-error" : undefined}
         />
-        <FieldError message={hasError(errors, "name")} />
+        <FieldError id="mcp-name-error" message={hasError(errors, "name")} />
       </FieldGroup>
 
       {/* Mode-specific fields */}
@@ -95,10 +96,11 @@ export default function McpServerForm({ values, onChange, errors, mode }) {
               value={values.command || ""}
               onChange={(e) => set("command", e.target.value)}
               placeholder="npx, python, node…"
+              aria-required="true"
               aria-invalid={!!hasError(errors, "command")}
-              aria-describedby="mcp-command-error"
+              aria-describedby={hasError(errors, "command") ? "mcp-command-error" : undefined}
             />
-            <FieldError message={hasError(errors, "command")} />
+            <FieldError id="mcp-command-error" message={hasError(errors, "command")} />
           </FieldGroup>
 
           {/* Args */}
@@ -110,9 +112,9 @@ export default function McpServerForm({ values, onChange, errors, mode }) {
               onChange={(v) => set("args", v)}
               placeholder='e.g. "-m", "server"'
               error={hasError(errors, "args")}
-              aria-describedby="mcp-args-error"
+              aria-describedby={hasError(errors, "args") ? "mcp-args-error" : undefined}
             />
-            <FieldError message={hasError(errors, "args")} />
+            <FieldError id="mcp-args-error" message={hasError(errors, "args")} />
           </FieldGroup>
 
           {/* Env */}
@@ -126,7 +128,7 @@ export default function McpServerForm({ values, onChange, errors, mode }) {
               error={hasError(errors, "env")}
               addLabel="+ Add variable"
             />
-            <FieldError message={hasError(errors, "env")} />
+            <FieldError id="mcp-env-error" message={hasError(errors, "env")} />
           </FieldGroup>
         </>
       ) : (
@@ -139,10 +141,11 @@ export default function McpServerForm({ values, onChange, errors, mode }) {
               value={values.url || ""}
               onChange={(e) => set("url", e.target.value)}
               placeholder="https://example.com/sse"
+              aria-required="true"
               aria-invalid={!!hasError(errors, "url")}
-              aria-describedby="mcp-url-error"
+              aria-describedby={hasError(errors, "url") ? "mcp-url-error" : undefined}
             />
-            <FieldError message={hasError(errors, "url")} />
+            <FieldError id="mcp-url-error" message={hasError(errors, "url")} />
           </FieldGroup>
 
           {/* Headers */}
@@ -158,7 +161,7 @@ export default function McpServerForm({ values, onChange, errors, mode }) {
               error={hasError(errors, "headers")}
               addLabel="+ Add header"
             />
-            <FieldError message={hasError(errors, "headers")} />
+            <FieldError id="mcp-headers-error" message={hasError(errors, "headers")} />
           </FieldGroup>
         </>
       )}
@@ -184,7 +187,7 @@ export default function McpServerForm({ values, onChange, errors, mode }) {
             placeholder="/path/to/project"
             aria-invalid={!!hasError(errors, "cwd")}
           />
-          <FieldError message={hasError(errors, "cwd")} />
+          <FieldError id="mcp-cwd-error" message={hasError(errors, "cwd")} />
         </FieldGroup>
       )}
 
@@ -205,7 +208,7 @@ export default function McpServerForm({ values, onChange, errors, mode }) {
           placeholder="30"
           aria-invalid={!!hasError(errors, "timeout")}
         />
-        <FieldError message={hasError(errors, "timeout")} />
+        <FieldError id="mcp-timeout-error" message={hasError(errors, "timeout")} />
       </FieldGroup>
 
       {/* Tools filter */}

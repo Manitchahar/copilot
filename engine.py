@@ -372,6 +372,14 @@ class PendingDecision:
     event: threading.Event = field(default_factory=threading.Event, repr=False)
 
 
+@dataclass
+class PendingPrompt:
+    id: str
+    prompt: str
+    attachments: list[dict[str, Any]] | None = None
+    mode: str = "enqueue"
+
+
 class TurnState:
     def __init__(self) -> None:
         self.idle = asyncio.Event()
@@ -410,6 +418,7 @@ class CopilotSessionController:
         self._context_usage: dict[str, int] = {"used": 0, "total": 0}
         self._total_tokens: int = 0
         self._provider = build_provider_from_env()
+        self._queued_prompts: list[PendingPrompt] = []
 
     @property
     def busy(self) -> bool:
@@ -493,6 +502,8 @@ class CopilotSessionController:
             "skill_directories": self.config.skill_directories,
             "disabled_skills": self.config.disabled_skills,
             "mcp_servers": list(self.config.mcp_servers.keys()) if self.config.mcp_servers else [],
+            "reasoning_effort": self.config.reasoning_effort,
+            "working_directory": self.config.working_directory or str(Path.cwd().resolve()),
         }
 
     async def start(self, *, session_id: str | None = None, resume: bool = False) -> None:
@@ -568,6 +579,15 @@ class CopilotSessionController:
             "title": self._session_title,
             "context_usage": self._context_usage,
             "total_tokens": self._total_tokens,
+            "queued_prompts": [
+                {
+                    "id": pending.id,
+                    "prompt": pending.prompt,
+                    "mode": pending.mode,
+                    "attachment_count": len(pending.attachments or []),
+                }
+                for pending in self._queued_prompts
+            ],
         }
 
     def subscribe(self, *, replay_recent: bool = True) -> asyncio.Queue:
@@ -625,22 +645,81 @@ class CopilotSessionController:
             }
         raise ValueError(f"Unknown attachment type: {att_type}")
 
-    async def send_prompt(self, prompt: str, attachments: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-        await self.start()
+    def _prepare_attachments(
+        self, attachments: list[dict[str, Any]] | None = None
+    ) -> list[dict[str, Any]] | None:
+        if not attachments:
+            return None
+        return [self._build_attachment(attachment) for attachment in attachments]
 
+    async def _maybe_start_next_prompt(self) -> None:
+        if self._busy or self._turn_lock.locked() or not self._queued_prompts:
+            return
+        next_prompt = self._queued_prompts.pop(0)
+        asyncio.create_task(
+            self._run_prompt(next_prompt.prompt, next_prompt.attachments),
+            name=f"queued-prompt-{self.session_id[:8]}",
+        )
+
+    async def enqueue_prompt(
+        self,
+        prompt: str,
+        attachments: list[dict[str, Any]] | None = None,
+        *,
+        priority: bool = False,
+    ) -> dict[str, Any]:
+        await self.start()
+        try:
+            prepared_attachments = self._prepare_attachments(attachments)
+        except ValueError as exc:
+            return {"started": False, "queued": False, "error": str(exc)}
+
+        if not self._busy and not self._turn_lock.locked() and not self._queued_prompts:
+            asyncio.create_task(
+                self._run_prompt(prompt, prepared_attachments),
+                name=f"prompt-{self.session_id[:8]}",
+            )
+            return {"started": True, "queued": False, "mode": "run"}
+
+        pending = PendingPrompt(
+            id=str(uuid4()),
+            prompt=prompt,
+            attachments=prepared_attachments,
+            mode="immediate" if priority else "enqueue",
+        )
+        if priority:
+            self._queued_prompts.insert(0, pending)
+            await self._emit(
+                "prompt_steered",
+                {
+                    "id": pending.id,
+                    "prompt": pending.prompt,
+                    "mode": pending.mode,
+                    "attachment_count": len(prepared_attachments or []),
+                },
+            )
+            if self._busy:
+                await self.abort()
+        else:
+            self._queued_prompts.append(pending)
+            await self._emit(
+                "prompt_queued",
+                {
+                    "id": pending.id,
+                    "prompt": pending.prompt,
+                    "mode": pending.mode,
+                    "attachment_count": len(prepared_attachments or []),
+                },
+            )
+        return {"started": False, "queued": True, "mode": pending.mode, "queue_id": pending.id}
+
+    async def _run_prompt(
+        self, prompt: str, sdk_attachments: list[dict[str, Any]] | None = None
+    ) -> dict[str, Any]:
         async with self._turn_lock:
             self._busy = True
             self._turn_state.reset()
             await self._emit("turn_started", {"prompt": prompt})
-
-            sdk_attachments = None
-            if attachments:
-                try:
-                    sdk_attachments = [self._build_attachment(a) for a in attachments]
-                except ValueError as exc:
-                    self._busy = False
-                    await self._emit("turn_complete", {"prompt": prompt, "final_content": None, "error": str(exc)})
-                    return {"prompt": prompt, "final_content": None, "error": str(exc)}
 
             result: dict[str, Any] = {"prompt": prompt, "final_content": None, "error": None}
             attempts = self.config.max_retries + 1
@@ -648,21 +727,18 @@ class CopilotSessionController:
             for attempt in range(1, attempts + 1):
                 self._turn_state.reset()
                 try:
-                    # Fire-and-forget: send() returns a message_id, does not block
                     await self.session.send(prompt, attachments=sdk_attachments)
                 except ExitRequested:
                     raise
                 except Exception as exc:
                     self._turn_state.last_error = str(exc)
 
-                # Wait for the SDK to signal idle (turn complete)
                 try:
                     await asyncio.wait_for(
                         self._turn_state.idle.wait(),
                         timeout=self.config.timeout + self.config.idle_wait_extra_seconds,
                     )
                 except asyncio.TimeoutError:
-                    # Fallback: try to recover content from message history
                     try:
                         messages = await self.session.get_messages()
                         for event in reversed(messages):
@@ -696,7 +772,20 @@ class CopilotSessionController:
                     "error": result["error"],
                 },
             )
-            return result
+        await self._maybe_start_next_prompt()
+        return result
+
+    async def send_prompt(self, prompt: str, attachments: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        await self.start()
+        try:
+            sdk_attachments = self._prepare_attachments(attachments)
+        except ValueError as exc:
+            await self._emit(
+                "turn_complete",
+                {"prompt": prompt, "final_content": None, "error": str(exc)},
+            )
+            return {"prompt": prompt, "final_content": None, "error": str(exc)}
+        return await self._run_prompt(prompt, sdk_attachments)
 
     async def abort(self) -> bool:
         """Cancel the current turn. Returns True if abort was sent."""

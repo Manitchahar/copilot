@@ -239,3 +239,10 @@ export function processEvent(state, type, data) {
 
   return next;
 }
+
+export function hydrateStateFromHistory(history = []) {
+  return history.reduce(
+    (state, event) => processEvent(state, event.type, event.data || {}),
+    createInitialState()
+  );
+}

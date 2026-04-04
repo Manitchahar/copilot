@@ -9,10 +9,10 @@ function err(field, message) {
 
 export function validateMcpLocal(values, existingNames = []) {
   const errors = [];
-  if (!values.name?.trim()) errors.push(err("name", "Name is required"));
+  if (!values.name?.trim()) errors.push(err("name", "Give this a name so you can find it later"));
   else if (/\s/.test(values.name)) errors.push(err("name", "Name must not contain spaces"));
   else if (existingNames.includes(values.name)) errors.push(err("name", `A server named "${values.name}" already exists`));
-  if (!values.command?.trim()) errors.push(err("command", "Command is required"));
+  if (!values.command?.trim()) errors.push(err("command", "Which command starts this server? e.g. npx, python"));
   if (values.args?.some((a) => !a.trim())) errors.push(err("args", "Empty arguments are not allowed"));
   if (values.env) {
     for (const key of Object.keys(values.env)) {
@@ -27,10 +27,10 @@ export function validateMcpLocal(values, existingNames = []) {
 
 export function validateMcpRemote(values, existingNames = []) {
   const errors = [];
-  if (!values.name?.trim()) errors.push(err("name", "Name is required"));
+  if (!values.name?.trim()) errors.push(err("name", "Give this a name so you can find it later"));
   else if (/\s/.test(values.name)) errors.push(err("name", "Name must not contain spaces"));
   else if (existingNames.includes(values.name)) errors.push(err("name", `A server named "${values.name}" already exists`));
-  if (!values.url?.trim()) errors.push(err("url", "URL is required"));
+  if (!values.url?.trim()) errors.push(err("url", "Enter the server's endpoint URL"));
   else if (!URL_RE.test(values.url)) errors.push(err("url", "Must be a valid HTTP or HTTPS URL"));
   if (values.timeout != null && (values.timeout < 1 || values.timeout > 600))
     errors.push(err("timeout", "Timeout must be between 1 and 600 seconds"));
@@ -45,7 +45,7 @@ export function validateProvider(values) {
     errors.push(err("base_url", `Base URL is required for ${values.type} providers`));
   else if (values.base_url && !URL_RE.test(values.base_url))
     errors.push(err("base_url", "Must be a valid URL"));
-  if (!values.api_key?.trim()) errors.push(err("api_key", "API key is required"));
+  if (!values.api_key?.trim()) errors.push(err("api_key", "Paste your API key to authenticate"));
   if (values.type === "azure" && !values.azure_api_version?.trim())
     errors.push(err("azure_api_version", "API version is required for Azure"));
   return errors;
@@ -53,14 +53,14 @@ export function validateProvider(values) {
 
 export function validateCustomAgent(values, existingNames = []) {
   const errors = [];
-  if (!values.name?.trim()) errors.push(err("name", "Name is required"));
+  if (!values.name?.trim()) errors.push(err("name", "Give this a name so you can find it later"));
   else if (!KEBAB_RE.test(values.name)) errors.push(err("name", "Must be lowercase letters, numbers, and hyphens"));
   else if (existingNames.includes(values.name)) errors.push(err("name", `An agent named "${values.name}" already exists`));
-  if (!values.display_name?.trim()) errors.push(err("display_name", "Display name is required"));
-  if (!values.description?.trim()) errors.push(err("description", "Description is required"));
+  if (!values.display_name?.trim()) errors.push(err("display_name", "Add a display name for the agent list"));
+  if (!values.description?.trim()) errors.push(err("description", "Describe what this agent does"));
   else if (values.description.length > 200) errors.push(err("description", "Maximum 200 characters"));
-  if (!values.prompt?.trim()) errors.push(err("prompt", "Prompt is required"));
-  else if (values.prompt.trim().length < 10) errors.push(err("prompt", "Prompt must be at least 10 characters"));
+  if (!values.prompt?.trim()) errors.push(err("prompt", "Your agent needs a system prompt to know how to behave"));
+  else if (values.prompt.trim().length < 10) errors.push(err("prompt", "The system prompt needs more detail — aim for at least a sentence"));
   if (values.tools?.some((t) => !t.trim())) errors.push(err("tools", "Empty tool names are not allowed"));
   return errors;
 }

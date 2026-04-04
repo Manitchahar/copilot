@@ -13,7 +13,7 @@ export default function CustomAgentForm({ values, onChange, errors }) {
   const descLen = values.description?.length || 0;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-4">
       {/* Name */}
       <div className="space-y-2">
         <Label htmlFor="agent-name">Name</Label>
@@ -22,13 +22,15 @@ export default function CustomAgentForm({ values, onChange, errors }) {
           value={values.name || ""}
           onChange={set("name")}
           placeholder="code-reviewer"
+          aria-required="true"
           aria-invalid={!!hasError(errors, "name")}
+          aria-describedby={hasError(errors, "name") ? "agent-name-error" : undefined}
         />
         <p className="text-xs text-muted-foreground">
           lowercase letters, numbers, and hyphens
         </p>
         {hasError(errors, "name") && (
-          <p className="text-sm text-destructive">{hasError(errors, "name")}</p>
+          <p id="agent-name-error" role="alert" className="text-sm text-destructive">{hasError(errors, "name")}</p>
         )}
       </div>
 
@@ -41,9 +43,10 @@ export default function CustomAgentForm({ values, onChange, errors }) {
           onChange={set("display_name")}
           placeholder="Code Reviewer"
           aria-invalid={!!hasError(errors, "display_name")}
+          aria-describedby={hasError(errors, "display_name") ? "agent-display-name-error" : undefined}
         />
         {hasError(errors, "display_name") && (
-          <p className="text-sm text-destructive">
+          <p id="agent-display-name-error" role="alert" className="text-sm text-destructive">
             {hasError(errors, "display_name")}
           </p>
         )}
@@ -60,16 +63,20 @@ export default function CustomAgentForm({ values, onChange, errors }) {
           maxLength={200}
           rows={2}
           aria-invalid={!!hasError(errors, "description")}
+          aria-describedby={hasError(errors, "description") ? "agent-description-error" : undefined}
         />
         <div className="flex items-center justify-between">
           {hasError(errors, "description") ? (
-            <p className="text-sm text-destructive">
+            <p id="agent-description-error" role="alert" className="text-sm text-destructive">
               {hasError(errors, "description")}
             </p>
           ) : (
             <span />
           )}
           <span
+            role="status"
+            aria-live="polite"
+            aria-label={`${descLen} of 200 characters used`}
             className={`text-xs tabular-nums ${
               descLen >= 200 ? "text-destructive" : "text-muted-foreground"
             }`}
@@ -89,10 +96,12 @@ export default function CustomAgentForm({ values, onChange, errors }) {
           placeholder="You are a helpful assistant that…"
           rows={4}
           className="min-h-[6rem]"
+          aria-required="true"
           aria-invalid={!!hasError(errors, "prompt")}
+          aria-describedby={hasError(errors, "prompt") ? "agent-prompt-error" : undefined}
         />
         {hasError(errors, "prompt") && (
-          <p className="text-sm text-destructive">
+          <p id="agent-prompt-error" role="alert" className="text-sm text-destructive">
             {hasError(errors, "prompt")}
           </p>
         )}
