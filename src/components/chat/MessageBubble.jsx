@@ -64,7 +64,7 @@ export default function MessageBubble({ message, isFirstInGroup, isLastInGroup }
         ))}
 
         {_aborted && (
-          <p className="mt-2 text-sm italic text-secondary">⏹ Generation stopped</p>
+          <p className="mt-2 text-sm italic text-muted-foreground">⏹ Generation stopped</p>
         )}
       </div>
     </div>

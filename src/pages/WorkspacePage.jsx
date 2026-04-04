@@ -11,8 +11,8 @@ const quickActions = [
 
 const mobileTabs = [
   { icon: "today", label: "Daily", active: true, href: "/" },
-  { icon: "chat_bubble", label: "Chat", href: "/session" },
-  { icon: "folder_open", label: "Files", href: "#" },
+  { icon: "terminal", label: "Commands", href: "/commands" },
+  { icon: "chat_bubble", label: "Sessions", href: "/" },
   { icon: "mail", label: "Messages", href: "#" },
 ];
 
@@ -69,6 +69,7 @@ export default function WorkspacePage() {
   };
 
   const activeSessions = sessions.filter((s) => !s.closed);
+  const sessionHref = activeSessions[0] ? `/session?id=${activeSessions[0].id}` : "/commands";
 
   return (
     <div className="min-h-screen bg-background text-on-surface selection:bg-primary-container/30">
@@ -86,10 +87,16 @@ export default function WorkspacePage() {
                 Daily
               </Link>
               <Link
-                to="/session"
+                to="/commands"
                 className="rounded-full px-4 py-1 font-serif tracking-tight text-[#5C614D] transition-colors hover:bg-[#F4F3F1]"
               >
-                Files
+                Commands
+              </Link>
+              <Link
+                to={sessionHref}
+                className="rounded-full px-4 py-1 font-serif tracking-tight text-[#5C614D] transition-colors hover:bg-[#F4F3F1]"
+              >
+                Session
               </Link>
               <a
                 href="#"
@@ -122,7 +129,7 @@ export default function WorkspacePage() {
               <h1 className="serif-display text-5xl font-light leading-tight tracking-tight text-on-surface md:text-6xl">
                 Let's knock something off your list
               </h1>
-              <p className="mx-auto mt-6 max-w-lg font-body text-lg leading-relaxed text-secondary opacity-80">
+              <p className="mx-auto mt-6 max-w-lg font-body text-lg leading-relaxed text-muted-foreground opacity-80">
                 Your digital sanctuary for focused work and quiet productivity.
                 What shall we tackle together today?
               </p>
@@ -143,7 +150,7 @@ export default function WorkspacePage() {
           {/* Active sessions */}
           {activeSessions.length > 0 && (
             <section className="mb-8 w-full">
-              <h2 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-secondary">
+              <h2 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                 Active Sessions
               </h2>
               <div className="grid gap-3 md:grid-cols-2">
@@ -162,11 +169,11 @@ export default function WorkspacePage() {
                       <p className="truncate text-sm font-medium text-on-surface">
                         Session {s.id.slice(0, 8)}…
                       </p>
-                      <p className="text-xs text-secondary">
+                      <p className="text-xs text-muted-foreground">
                         {s.busy ? "Working…" : "Idle"} · {s.recent_events?.length || 0} events
                       </p>
                     </div>
-                    <span className="material-symbols-outlined text-sm text-secondary opacity-0 transition-opacity group-hover:opacity-100">
+                    <span className="material-symbols-outlined text-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
                       arrow_forward
                     </span>
                   </Link>
@@ -213,6 +220,13 @@ export default function WorkspacePage() {
                 onSubmit={handleSubmit}
                 className="flex items-center rounded-full border border-outline-variant/10 bg-surface-container-highest/90 p-2 shadow-sm backdrop-blur-xl"
               >
+                <Link
+                  to="/commands"
+                  className="ml-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[#5C614D] transition-colors hover:bg-[#F4F3F1]"
+                  title="Open commands"
+                >
+                  <span className="material-symbols-outlined">terminal</span>
+                </Link>
                 <div className="flex-grow pl-6">
                   <input
                     type="text"
@@ -280,7 +294,7 @@ export default function WorkspacePage() {
 
         <aside className="fixed left-12 top-1/2 hidden max-w-[120px] -translate-y-1/2 opacity-40 xl:block">
           <p
-            className="rotate-180 text-[10px] uppercase tracking-widest text-secondary"
+            className="rotate-180 text-[10px] uppercase tracking-widest text-muted-foreground"
             style={{ writingMode: "vertical-rl" }}
           >
             Est. MMXXIV   -   Crafted for focus

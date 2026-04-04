@@ -37,7 +37,7 @@ export default function SubagentCard({ block }) {
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="font-medium text-on-surface">{agentName}</span>
-          <span className="text-xs text-secondary">{style.label}</span>
+          <span className="text-xs text-muted-foreground">{style.label}</span>
         </div>
         {error && (
           <p className="mt-1 text-xs text-red-600 break-words">{error}</p>

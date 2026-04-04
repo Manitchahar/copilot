@@ -3,7 +3,7 @@ export default function MCPStatusPanel({ mcpStatus }) {
 
   return (
     <div className="space-y-1">
-      <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-secondary">
+      <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         <span className="material-symbols-outlined text-[14px]">hub</span>
         MCP Servers
       </h4>
@@ -21,10 +21,10 @@ export default function MCPStatusPanel({ mcpStatus }) {
             ))}
           </ul>
         ) : (
-          <p className="text-xs text-secondary">Connected</p>
+          <p className="text-xs text-muted-foreground">Connected</p>
         )
       ) : (
-        <p className="text-xs text-secondary">Loading…</p>
+        <p className="text-xs text-muted-foreground">Loading…</p>
       )}
     </div>
   );

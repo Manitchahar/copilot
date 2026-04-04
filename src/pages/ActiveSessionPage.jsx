@@ -18,14 +18,6 @@ import MCPStatusPanel from "../components/agents/MCPStatusPanel";
 import ConnectorsPanel from "../components/connectors/ConnectorsPanel";
 import useConnectorConfig from "../hooks/useConnectorConfig";
 
-// ── Sidebar nav items ────────────────────────────────────
-const sidebarItems = [
-  { icon: "monitoring", label: "Monitor", id: "chat" },
-  { icon: "menu_book", label: "Research", href: "/" },
-  { icon: "edit_note", label: "Notes", href: "#" },
-  { icon: "hub", label: "Connectors", id: "connectors" },
-];
-
 // ── Helpers ──────────────────────────────────────────────
 function trimStatusText(value, max = 120) {
   if (!value) return "";
@@ -114,7 +106,7 @@ function statusToneClasses(tone) {
       return {
         dot: "bg-green-500",
         card: "border-outline-variant/30 bg-surface-container-lowest",
-        text: "text-secondary",
+        text: "text-muted-foreground",
       };
   }
 }
@@ -148,6 +140,13 @@ export default function ActiveSessionPage() {
   const [searchParams] = useSearchParams();
   const sessionId = searchParams.get("id");
   const resumeRequested = searchParams.get("resume") === "1";
+  const commandRoute = sessionId ? `/commands?sessionId=${encodeURIComponent(sessionId)}` : "/commands";
+  const sidebarItems = [
+    { icon: "monitoring", label: "Monitor", id: "chat" },
+    { icon: "terminal", label: "Commands", href: commandRoute },
+    { icon: "hub", label: "Connectors", id: "connectors" },
+    { icon: "home", label: "Workspace", href: "/" },
+  ];
 
   // Chat state
   const [msgState, setMsgState] = useState(createInitialState);
@@ -187,13 +186,35 @@ export default function ActiveSessionPage() {
   const [activeView, setActiveView] = useState("chat"); // "chat" | "connectors"
   const connectorConfig = useConnectorConfig();
 
+  const confirmCanLeaveConnectors = useCallback(() => {
+    if (activeView !== "connectors" || !connectorConfig.dirty) return true;
+    if (!window.confirm("You have unsaved connector changes. Discard them?")) return false;
+    connectorConfig.reset();
+    return true;
+  }, [activeView, connectorConfig]);
+
   function handleViewChange(viewId) {
-    if (activeView === "connectors" && connectorConfig.dirty) {
-      if (!window.confirm("You have unsaved connector changes. Discard them?")) return;
-      connectorConfig.reset();
-    }
+    if (!confirmCanLeaveConnectors()) return;
     setActiveView(viewId);
   }
+
+  const handleRouteLeave = useCallback(
+    (e) => {
+      if (!confirmCanLeaveConnectors()) {
+        e.preventDefault();
+      }
+    },
+    [confirmCanLeaveConnectors]
+  );
+
+  const handleSessionHome = useCallback(
+    (e) => {
+      e.preventDefault();
+      if (!confirmCanLeaveConnectors()) return;
+      setActiveView("chat");
+    },
+    [confirmCanLeaveConnectors]
+  );
 
   // Pending approval / input requests
   const [pendingRequests, setPendingRequests] = useState([]); // { request_id, kind, payload }
@@ -811,19 +832,25 @@ export default function ActiveSessionPage() {
 
   const handleUserInput = async (requestId, answer) => {
     try {
+      setStatusTone("working");
+      setStatusText("Answer sent. Continuing the run…");
+      setError(null);
       await sendUserInput(sessionId, requestId, answer);
       setPendingRequests((prev) =>
         prev.filter((r) => r.request_id !== requestId)
       );
     } catch (err) {
-      console.error("Input reply failed:", err);
+      const message = err instanceof Error ? err.message : "Could not submit your answer";
+      setError(message);
+      setStatusTone("error");
+      setStatusText("Input submission failed");
     }
   };
 
   // ── No session ID guard ────────────────────────────────
   if (!sessionId) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background text-secondary">
+      <div className="flex min-h-screen items-center justify-center bg-background text-muted-foreground">
         <div className="text-center space-y-4">
           <span className="material-symbols-outlined text-6xl text-primary/40">
             link_off
@@ -848,7 +875,11 @@ export default function ActiveSessionPage() {
         {/* ── Sidebar ─────────────────────────────────── */}
         <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-outline-variant/30 bg-surface-container-low py-6 md:flex">
           <div className="mb-10 px-6">
-            <Link to="/session" className="flex items-center gap-3">
+            <Link
+              to={`/session?id=${sessionId}`}
+              onClick={handleSessionHome}
+              className="flex items-center gap-3"
+            >
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-on-primary">
                 <span className="material-symbols-outlined">menu_book</span>
               </div>
@@ -856,7 +887,7 @@ export default function ActiveSessionPage() {
                 <h1 className="font-newsreader text-lg font-semibold leading-tight text-on-surface">
                   Cloud Cowork
                 </h1>
-                <p className="font-body text-[10px] uppercase tracking-widest text-secondary">
+                <p className="font-body text-[10px] uppercase tracking-widest text-muted-foreground">
                   {connected ? "Connected" : "Connecting…"}
                 </p>
               </div>
@@ -878,7 +909,7 @@ export default function ActiveSessionPage() {
               );
               const cls = isActive
                 ? "ml-2 flex items-center gap-3 rounded-l-full bg-surface px-4 py-3 font-bold text-primary shadow-sm"
-                : "mx-2 flex items-center gap-3 rounded-full px-6 py-3 text-secondary transition-colors hover:bg-surface-container-high cursor-pointer";
+                : "mx-2 flex items-center gap-3 rounded-full px-6 py-3 text-muted-foreground transition-colors hover:bg-surface-container-high cursor-pointer";
               if (item.id) {
                 return (
                   <button key={item.label} onClick={() => handleViewChange(item.id)} aria-current={isActive ? "true" : undefined} className={cls}>
@@ -887,7 +918,7 @@ export default function ActiveSessionPage() {
                 );
               }
               return item.href.startsWith("/") ? (
-                <Link key={item.label} to={item.href} className={cls}>
+                <Link key={item.label} to={item.href} onClick={handleRouteLeave} className={cls}>
                   {content}
                 </Link>
               ) : (
@@ -901,6 +932,7 @@ export default function ActiveSessionPage() {
           <div className="mt-auto px-6">
             <Link
               to="/"
+              onClick={handleRouteLeave}
               className="flex w-full items-center justify-center gap-2 rounded-full bg-primary-container py-4 font-label font-bold text-on-primary-container transition-opacity hover:opacity-90"
             >
               <span className="material-symbols-outlined">add</span>
@@ -914,7 +946,8 @@ export default function ActiveSessionPage() {
           <header className="sticky top-0 z-50 flex w-full items-center justify-between bg-background/80 px-8 py-4 shadow-sm backdrop-blur-xl">
             <div className="flex items-center gap-8">
               <Link
-                to="/session"
+                to={`/session?id=${sessionId}`}
+                onClick={handleSessionHome}
                 className="font-newsreader text-xl font-bold text-on-surface"
               >
                 Cloud Cowork
@@ -922,9 +955,17 @@ export default function ActiveSessionPage() {
               <nav className="hidden gap-6 lg:flex">
                 <Link
                   to="/"
-                  className="font-newsreader text-lg italic tracking-tight text-secondary transition-colors hover:text-primary"
+                  onClick={handleRouteLeave}
+                  className="font-newsreader text-lg italic tracking-tight text-muted-foreground transition-colors hover:text-primary"
                 >
                   Workspace
+                </Link>
+                <Link
+                  to={commandRoute}
+                  onClick={handleRouteLeave}
+                  className="font-newsreader text-lg italic tracking-tight text-muted-foreground transition-colors hover:text-primary"
+                >
+                  Commands
                 </Link>
                 <span className="border-b-2 border-primary pb-1 font-newsreader text-lg italic tracking-tight text-primary">
                   Session
@@ -933,7 +974,7 @@ export default function ActiveSessionPage() {
             </div>
             <div className="flex items-center gap-4">
               {/* Connection indicator */}
-              <div className="flex items-center gap-2 text-xs text-secondary">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <span
                   className={`h-2 w-2 rounded-full ${
                     connected ? "bg-green-500" : "bg-red-400"
@@ -966,7 +1007,7 @@ export default function ActiveSessionPage() {
                   <div className={`flex items-center gap-2 text-sm font-medium ${toneClasses.text}`}>
                     <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${toneClasses.dot}`} />
                     <span className="truncate">{statusText}</span>
-                    <span className="ml-auto shrink-0 rounded-full bg-surface-container px-2.5 py-0.5 text-[11px] font-normal text-secondary">
+                    <span className="ml-auto shrink-0 rounded-full bg-surface-container px-2.5 py-0.5 text-[11px] font-normal text-muted-foreground">
                       {sessionMeta.model}
                     </span>
                   </div>
@@ -1050,10 +1091,10 @@ export default function ActiveSessionPage() {
                 {/* Current file */}
                 <div className="mb-10">
                   <div className="mb-4 flex items-center justify-between">
-                    <h3 className="font-label text-[10px] font-bold uppercase tracking-widest text-secondary">
+                    <h3 className="font-label text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                       Runtime
                     </h3>
-                    <span className="rounded-full bg-surface px-2 py-0.5 text-[10px] text-secondary">
+                    <span className="rounded-full bg-surface px-2 py-0.5 text-[10px] text-muted-foreground">
                       LIVE
                     </span>
                   </div>
@@ -1069,12 +1110,12 @@ export default function ActiveSessionPage() {
                       <RuntimeRow label="Workdir" value={sessionMeta.working_directory} />
                     )}
                     {sessionMeta.mcp_servers && sessionMeta.mcp_servers.length > 0 && (
-                      <p className="text-xs text-secondary">
+                      <p className="text-xs text-muted-foreground">
                         MCP: {sessionMeta.mcp_servers.join(", ")}
                       </p>
                     )}
                     {sessionMeta.custom_agents && sessionMeta.custom_agents.length > 0 && (
-                      <p className="text-xs text-secondary">
+                      <p className="text-xs text-muted-foreground">
                         Agents: {sessionMeta.custom_agents.join(", ")}
                       </p>
                     )}
@@ -1083,7 +1124,7 @@ export default function ActiveSessionPage() {
 
                 <div className="mb-10">
                   <div className="mb-4 flex items-center justify-between">
-                    <h3 className="font-label text-[10px] font-bold uppercase tracking-widest text-secondary">
+                    <h3 className="font-label text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                       Session
                     </h3>
                   </div>
@@ -1091,14 +1132,14 @@ export default function ActiveSessionPage() {
                     <p className="text-sm font-semibold text-on-surface">
                       {sessionTitle}
                     </p>
-                    <p className="mt-1 text-xs text-secondary">
+                    <p className="mt-1 text-xs text-muted-foreground">
                       {connected ? "Live session connected" : "Waiting for live connection"}
                     </p>
                   </div>
                 </div>
 
                 <div className="mb-10">
-                  <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-secondary">
+                  <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                     Run Status
                   </h3>
                   <div className={`rounded-[1rem] border p-4 ${toneClasses.card}`}>
@@ -1114,7 +1155,7 @@ export default function ActiveSessionPage() {
 
                 <div className="mb-10">
                   <div className="mb-4 flex items-center justify-between">
-                    <h3 className="font-label text-[10px] font-bold uppercase tracking-widest text-secondary">
+                    <h3 className="font-label text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                       Current File
                     </h3>
                     {currentFile && (
@@ -1134,13 +1175,13 @@ export default function ActiveSessionPage() {
                         <p className="truncate text-sm font-semibold text-on-surface">
                           {currentFile.name}
                         </p>
-                        <p className="text-xs text-secondary">
+                        <p className="text-xs text-muted-foreground">
                           via {currentFile.tool}
                         </p>
                       </div>
                     </div>
                   ) : (
-                    <p className="text-xs italic text-secondary/50">
+                    <p className="text-xs italic text-muted-foreground/50">
                       No files touched yet
                     </p>
                   )}
@@ -1149,7 +1190,7 @@ export default function ActiveSessionPage() {
                 {/* Artifacts */}
                 {artifacts.length > 0 && (
                   <div className="mb-10">
-                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-secondary">
+                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                       Project Artifacts
                     </h3>
                     <div className="space-y-3">
@@ -1167,7 +1208,7 @@ export default function ActiveSessionPage() {
                             <p className="truncate text-sm font-medium text-on-surface">
                               {artifact.name}
                             </p>
-                            <p className="text-xs text-secondary">
+                            <p className="text-xs text-muted-foreground">
                               {artifact.meta}
                             </p>
                           </div>
@@ -1180,7 +1221,7 @@ export default function ActiveSessionPage() {
                 {/* Folders */}
                 {folders.length > 0 && (
                   <div className="mb-10">
-                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-secondary">
+                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                       Relevant Folders
                     </h3>
                     <div className="space-y-2">
@@ -1189,7 +1230,7 @@ export default function ActiveSessionPage() {
                           key={folder.path}
                           className="group flex cursor-pointer items-center gap-3 rounded-full p-2 transition-colors hover:bg-surface-container"
                         >
-                          <span className="material-symbols-outlined text-secondary transition-colors group-hover:text-primary">
+                          <span className="material-symbols-outlined text-muted-foreground transition-colors group-hover:text-primary">
                             {folder.icon}
                           </span>
                           <span className="font-body text-sm text-on-surface truncate" title={folder.path}>
@@ -1204,7 +1245,7 @@ export default function ActiveSessionPage() {
                 {/* Running tools indicator */}
                 {activeTools.length > 0 && (
                   <div className="mb-10">
-                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-secondary">
+                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                       Active Tools
                     </h3>
                     <div className="space-y-2">
@@ -1225,7 +1266,7 @@ export default function ActiveSessionPage() {
 
                 {queuedPrompts.length > 0 && (
                   <div className="mb-10">
-                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-secondary">
+                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                       Queued Work
                     </h3>
                     <div className="space-y-2">
@@ -1237,7 +1278,7 @@ export default function ActiveSessionPage() {
                           <p className="font-medium text-on-surface">
                             {trimStatusText(prompt.prompt, 90)}
                           </p>
-                          <p className="mt-1 text-xs text-secondary">
+                          <p className="mt-1 text-xs text-muted-foreground">
                             {prompt.mode === "immediate" ? "Runs next after abort" : "Queued to run next"}
                             {prompt.attachment_count ? ` • ${prompt.attachment_count} attachment(s)` : ""}
                           </p>
@@ -1251,7 +1292,7 @@ export default function ActiveSessionPage() {
 
                 {activeSubagents.length > 0 && (
                   <div className="mb-10">
-                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-secondary">
+                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                       Active Subagents
                     </h3>
                     <ul className="space-y-2">
@@ -1270,7 +1311,7 @@ export default function ActiveSessionPage() {
                             }`}
                           />
                           <span className="truncate">{agent.name}</span>
-                          <span className="ml-auto text-secondary capitalize">{agent.status}</span>
+                          <span className="ml-auto text-muted-foreground capitalize">{agent.status}</span>
                         </li>
                       ))}
                     </ul>
@@ -1279,7 +1320,7 @@ export default function ActiveSessionPage() {
 
                 {loadedSkills.length > 0 && (
                   <div className="mb-10">
-                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-secondary">
+                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                       Skills
                     </h3>
                     <div className="flex flex-wrap gap-1">
@@ -1297,7 +1338,7 @@ export default function ActiveSessionPage() {
 
                 {activityLog.length > 0 && (
                   <div className="mb-10">
-                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-secondary">
+                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                       Recent Activity
                     </h3>
                     <div className="space-y-2">
@@ -1321,7 +1362,7 @@ export default function ActiveSessionPage() {
                     <p className="font-newsreader text-xl font-bold text-primary">
                       {queryCount}
                     </p>
-                    <p className="text-[10px] uppercase tracking-tighter text-secondary">
+                    <p className="text-[10px] uppercase tracking-tighter text-muted-foreground">
                       Queries This Session
                     </p>
                   </div>
@@ -1329,7 +1370,7 @@ export default function ActiveSessionPage() {
                     <p className="font-newsreader text-xl font-bold text-primary">
                       {artifacts.length}
                     </p>
-                    <p className="text-[10px] uppercase tracking-tighter text-secondary">
+                    <p className="text-[10px] uppercase tracking-tighter text-muted-foreground">
                       Artifacts Created
                     </p>
                   </div>
@@ -1337,7 +1378,7 @@ export default function ActiveSessionPage() {
                     <p className="font-newsreader text-xl font-bold text-primary">
                       {runtimeStats.totalTokens}
                     </p>
-                    <p className="text-[10px] uppercase tracking-tighter text-secondary">
+                    <p className="text-[10px] uppercase tracking-tighter text-muted-foreground">
                       Total Tokens
                     </p>
                   </div>
@@ -1347,7 +1388,7 @@ export default function ActiveSessionPage() {
                         ? `${Math.round((runtimeStats.contextUsage.used / runtimeStats.contextUsage.total) * 100)}%`
                         : "0%"}
                     </p>
-                    <p className="text-[10px] uppercase tracking-tighter text-secondary">
+                    <p className="text-[10px] uppercase tracking-tighter text-muted-foreground">
                       Context Used
                     </p>
                   </div>
@@ -1362,15 +1403,16 @@ export default function ActiveSessionPage() {
 
       {/* Mobile bottom nav */}
       <nav className="fixed bottom-0 left-0 z-50 flex w-full items-center justify-around rounded-t-[3rem] border-t border-outline-variant/30 bg-background px-6 pb-4 pt-2 shadow-[0_-4px_30px_rgba(26,28,26,0.05)] md:hidden">
-        <a
-          href="#"
-          className="flex flex-col items-center justify-center p-3 text-secondary"
+        <Link
+          to={commandRoute}
+          onClick={handleRouteLeave}
+          className="flex flex-col items-center justify-center p-3 text-muted-foreground"
         >
           <span className="material-symbols-outlined">terminal</span>
           <span className="mt-1 font-label text-[10px] font-semibold">
             Command
           </span>
-        </a>
+        </Link>
         <Link
           to={`/session?id=${sessionId}`}
           className="-translate-y-4 scale-110 rounded-full bg-primary p-4 text-background shadow-lg shadow-primary/20"
@@ -1379,7 +1421,8 @@ export default function ActiveSessionPage() {
         </Link>
         <Link
           to="/"
-          className="flex flex-col items-center justify-center p-3 text-secondary"
+          onClick={handleRouteLeave}
+          className="flex flex-col items-center justify-center p-3 text-muted-foreground"
         >
           <span className="material-symbols-outlined">history_edu</span>
           <span className="mt-1 font-label text-[10px] font-semibold">
@@ -1393,7 +1436,7 @@ export default function ActiveSessionPage() {
 
 function RuntimeBadge({ label, value }) {
   return (
-    <span className="rounded-full bg-surface px-3 py-1 text-[11px] uppercase tracking-wide text-secondary">
+    <span className="rounded-full bg-surface px-3 py-1 text-[11px] uppercase tracking-wide text-muted-foreground">
       {label}: {value}
     </span>
   );
@@ -1402,7 +1445,7 @@ function RuntimeBadge({ label, value }) {
 function RuntimeRow({ label, value }) {
   return (
     <div className="flex items-center justify-between gap-4 text-sm">
-      <span className="text-secondary">{label}</span>
+      <span className="text-muted-foreground">{label}</span>
       <span className="text-right font-medium text-on-surface">{value}</span>
     </div>
   );
@@ -1412,51 +1455,65 @@ function RuntimeRow({ label, value }) {
 
 function UserInputBanner({ req, onSubmit }) {
   const [answer, setAnswer] = useState("");
+  const [submittingChoice, setSubmittingChoice] = useState(null);
   const { payload } = req;
+
+  const submitAnswer = async (value) => {
+    if (!value?.trim()) return;
+    setSubmittingChoice(value);
+    try {
+      await onSubmit(value.trim());
+    } finally {
+      setSubmittingChoice(null);
+    }
+  };
+
   return (
-    <div className="space-y-4">
+    <div className="rounded-[1.25rem] border border-amber-200 bg-amber-50 px-5 py-5 shadow-sm">
       <div className="flex items-center justify-center gap-2 text-primary">
         <span className="material-symbols-outlined">help</span>
         <span className="font-label text-sm font-bold uppercase tracking-wide">
           Input Requested
         </span>
       </div>
-      <p className="font-newsreader text-base text-center text-on-surface">
+      <p className="mt-3 font-newsreader text-base text-center text-on-surface">
         {payload.question || "The agent needs your input."}
       </p>
       {payload.choices?.length > 0 && (
-        <div className="flex flex-wrap justify-center gap-2">
+        <div className="mt-4 flex flex-wrap justify-center gap-2">
           {payload.choices.map((choice) => (
             <button
               key={choice}
-              onClick={() => onSubmit(choice)}
-              className="rounded-full border border-outline-variant px-4 py-2 text-sm transition-colors hover:bg-primary hover:text-on-primary"
+              onClick={() => submitAnswer(choice)}
+              disabled={Boolean(submittingChoice)}
+              className="rounded-full border border-outline-variant bg-white px-4 py-2 text-sm transition-colors hover:bg-primary hover:text-on-primary disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {choice}
+              {submittingChoice === choice ? "Sending…" : choice}
             </button>
           ))}
         </div>
       )}
       {(payload.allow_freeform !== false || !payload.choices?.length) && (
         <form
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
-            if (answer.trim()) onSubmit(answer.trim());
+            await submitAnswer(answer);
           }}
-          className="flex items-center gap-2"
+          className="mt-4 flex items-center gap-2"
         >
           <input
             value={answer}
             onChange={(e) => setAnswer(e.target.value)}
             placeholder="Type your answer…"
-            className="flex-1 rounded-full border border-outline-variant bg-surface px-4 py-2 text-sm focus:ring-1 focus:ring-primary"
+            disabled={Boolean(submittingChoice)}
+            className="flex-1 rounded-full border border-outline-variant bg-white px-4 py-2 text-sm focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-60"
           />
           <button
             type="submit"
-            disabled={!answer.trim()}
+            disabled={!answer.trim() || Boolean(submittingChoice)}
             className="rounded-full bg-primary px-4 py-2 text-sm font-bold text-on-primary disabled:opacity-40"
           >
-            Submit
+            {submittingChoice ? "Sending…" : "Submit"}
           </button>
         </form>
       )}

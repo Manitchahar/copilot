@@ -117,7 +117,7 @@ export default function ChatInput({
                 "rounded-full border px-3 py-1.5 text-xs transition-colors",
                 sendMode === mode
                   ? "border-primary bg-primary text-on-primary"
-                  : "border-outline-variant/30 bg-white text-secondary hover:bg-surface"
+                  : "border-outline-variant/30 bg-white text-muted-foreground hover:bg-surface"
               )}
             >
               {label}
@@ -141,17 +141,17 @@ export default function ChatInput({
                 key={attachment.id}
                 className="inline-flex items-center gap-2 rounded-full border border-outline-variant/20 bg-white px-3 py-1.5 text-xs text-on-surface shadow-sm"
               >
-                <span className="material-symbols-outlined text-[15px] text-secondary">
+                <span className="material-symbols-outlined text-[15px] text-muted-foreground">
                   {attachment.media_type?.startsWith("image/") ? "image" : "attach_file"}
                 </span>
                 <span className="max-w-[14rem] truncate">{attachment.name}</span>
                 {attachment.sizeLabel && (
-                  <span className="text-secondary">{attachment.sizeLabel}</span>
+                  <span className="text-muted-foreground">{attachment.sizeLabel}</span>
                 )}
                 <button
                   type="button"
                   onClick={() => onRemoveAttachment?.(attachment.id)}
-                  className="text-secondary transition-colors hover:text-on-surface"
+                  className="text-muted-foreground transition-colors hover:text-on-surface"
                   aria-label={`Remove ${attachment.name}`}
                 >
                   <span className="material-symbols-outlined text-[15px]">close</span>
@@ -181,7 +181,7 @@ export default function ChatInput({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="flex h-8 w-8 items-center justify-center rounded-full text-secondary transition-colors hover:bg-surface hover:text-on-surface"
+              className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-surface hover:text-on-surface"
               title="Attach files"
             >
               <span className="material-symbols-outlined text-[18px]">attach_file</span>
@@ -189,7 +189,7 @@ export default function ChatInput({
             <button
               type="button"
               onClick={() => directoryInputRef.current?.click()}
-              className="flex h-8 w-8 items-center justify-center rounded-full text-secondary transition-colors hover:bg-surface hover:text-on-surface"
+              className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-surface hover:text-on-surface"
               title="Attach folder"
             >
               <span className="material-symbols-outlined text-[18px]">folder</span>
