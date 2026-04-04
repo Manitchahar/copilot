@@ -19,7 +19,7 @@ export default function CodeBlock({ language, children }) {
   }, [children]);
 
   return (
-    <div className="group relative my-4 overflow-hidden rounded-xl bg-[#1e1e1e] shadow-sm">
+    <div className="group relative my-4 overflow-hidden rounded-xl bg-code shadow-sm">
       <div className="flex items-center justify-between border-b border-white/5 px-4 py-2.5">
         <span className="font-mono text-xs text-white/40">
           {language || "plaintext"}
@@ -39,7 +39,7 @@ export default function CodeBlock({ language, children }) {
         </button>
       </div>
       <pre className="overflow-x-auto p-4 text-[13px] leading-relaxed">
-        <code className="text-[#e5e5e0]">{children}</code>
+        <code className="text-code-foreground">{children}</code>
       </pre>
     </div>
   );

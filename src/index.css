@@ -4,47 +4,124 @@
 
 @layer base {
   :root {
-    --background: 60 17% 94%;
-    --foreground: 0 0% 10%;
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 10%;
+    /* Hybrid 2 — Cursor × Claude warm light mode */
+    --background: 60 5% 98%;          /* #FAFAF8 warm off-white canvas */
+    --foreground: 240 6% 16%;         /* #27272A soft black */
+    --card: 0 0% 100%;                /* #FFFFFF lifted surface */
+    --card-foreground: 240 6% 16%;
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 10%;
-    --primary: 15 63% 60%;
+    --popover-foreground: 240 6% 16%;
+    --primary: 15 63% 60%;            /* #D97757 terracotta — brand accent */
     --primary-foreground: 0 0% 100%;
-    --secondary: 60 10% 90%;
-    --secondary-foreground: 0 0% 10%;
-    --muted: 60 5% 92%;
-    --muted-foreground: 0 0% 40%;
-    --accent: 60 7% 87%;
-    --accent-foreground: 0 0% 10%;
-    --destructive: 0 75% 42%;
-    --border: 60 4% 82%;
-    --input: 60 4% 82%;
+    --secondary: 240 5% 96%;          /* zinc-100 */
+    --secondary-foreground: 240 6% 10%;
+    --muted: 240 5% 96%;              /* zinc-100 subtle surfaces */
+    --muted-foreground: 240 4% 46%;   /* zinc-500 */
+    --accent: 240 5% 96%;
+    --accent-foreground: 240 6% 10%;
+    --destructive: 0 72% 51%;         /* red-600 #DC2626 */
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 6% 90%;             /* zinc-200 crisp borders */
+    --input: 240 6% 90%;
+    --ring: 15 63% 60%;               /* terracotta focus ring */
+    --radius: 0.625rem;               /* 10px — balanced corners */
+
+    /* Code blocks */
+    --code-surface: 0 0% 12%;         /* #1e1e1e */
+    --code-foreground: 60 2% 88%;     /* #e5e5e0 */
+
+    /* Status semantic colors */
+    --status-running: 217 91% 60%;        /* blue-500 #3B82F6 */
+    --status-running-bg: 214 95% 93%;     /* blue-50 #EFF6FF */
+    --status-running-border: 213 93% 83%; /* blue-200 #BFDBFE */
+    --status-success: 160 84% 39%;        /* emerald-600 #059669 */
+    --status-success-bg: 152 81% 96%;     /* emerald-50 #ECFDF5 */
+    --status-success-border: 149 80% 82%; /* emerald-200 #A7F3D0 */
+    --status-error: 0 72% 51%;            /* red-600 #DC2626 */
+    --status-error-bg: 0 86% 97%;         /* red-50 #FEF2F2 */
+    --status-error-border: 0 93% 82%;     /* red-200 #FECACA */
+    --status-warning: 38 92% 50%;         /* amber-500 #F59E0B */
+    --status-warning-bg: 48 96% 89%;      /* amber-50 #FFFBEB */
+    --status-warning-border: 48 97% 77%;  /* amber-200 #FDE68A */
+    --status-info: 199 89% 48%;           /* sky-600 #0284C7 */
+    --status-info-bg: 204 100% 97%;       /* sky-50 #F0F9FF */
+    --status-info-border: 201 94% 86%;    /* sky-200 #BAE6FD */
+    --status-special: 263 70% 50%;        /* violet-600 #7C3AED */
+    --status-special-bg: 250 100% 98%;    /* violet-50 #F5F3FF */
+    --status-special-border: 253 95% 85%; /* violet-200 #DDD6FE */
+    --status-neutral: 215 14% 34%;        /* slate-600 #475569 */
+    --status-neutral-bg: 210 40% 98%;     /* slate-50 #F8FAFC */
+    --status-neutral-border: 214 32% 91%; /* slate-200 #E2E8F0 */
+  }
+
+  .dark {
+    /* Hybrid 2 dark — warm dark canvas (Warp-inspired warmth) */
+    --background: 30 5% 8%;           /* warm near-black */
+    --foreground: 40 10% 95%;         /* warm off-white text */
+    --card: 30 3% 12%;               /* elevated dark surface */
+    --card-foreground: 40 10% 95%;
+    --popover: 30 3% 12%;
+    --popover-foreground: 40 10% 95%;
+    --primary: 15 63% 60%;            /* terracotta stays */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 30 3% 16%;
+    --secondary-foreground: 40 10% 95%;
+    --muted: 30 3% 16%;
+    --muted-foreground: 30 5% 55%;
+    --accent: 30 3% 16%;
+    --accent-foreground: 40 10% 95%;
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 30 3% 18%;
+    --input: 30 3% 18%;
     --ring: 15 63% 60%;
-    --radius: 1rem;
+
+    /* Code blocks stay dark */
+    --code-surface: 0 0% 10%;
+    --code-foreground: 60 2% 88%;
+
+    /* Status colors — inverted for dark surfaces */
+    --status-running: 217 91% 60%;
+    --status-running-bg: 217 91% 60% / 0.12;
+    --status-running-border: 217 91% 60% / 0.25;
+    --status-success: 160 84% 39%;
+    --status-success-bg: 160 84% 39% / 0.12;
+    --status-success-border: 160 84% 39% / 0.25;
+    --status-error: 0 72% 51%;
+    --status-error-bg: 0 72% 51% / 0.12;
+    --status-error-border: 0 72% 51% / 0.25;
+    --status-warning: 38 92% 50%;
+    --status-warning-bg: 38 92% 50% / 0.12;
+    --status-warning-border: 38 92% 50% / 0.25;
+    --status-info: 199 89% 48%;
+    --status-info-bg: 199 89% 48% / 0.12;
+    --status-info-border: 199 89% 48% / 0.25;
+    --status-special: 263 70% 50%;
+    --status-special-bg: 263 70% 50% / 0.12;
+    --status-special-border: 263 70% 50% / 0.25;
+    --status-neutral: 215 20% 65%;
+    --status-neutral-bg: 215 14% 34% / 0.12;
+    --status-neutral-border: 215 14% 34% / 0.25;
   }
 }
 
-:root {
-  color: #1a1a1a;
-  background-color: #f3f3ee;
-  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 }
 
+/* Base resets */
 html,
 body,
 #root {
-  min-height: 100%;
-}
-
-body {
-  margin: 0;
-  background-color: #f3f3ee;
-  color: #1a1a1a;
-  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  height: 100%;
 }
 
 a {
@@ -57,13 +134,10 @@ input {
   font: inherit;
 }
 
-.material-symbols-outlined {
-  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
-  vertical-align: middle;
-}
-
+/* Clean Custom Scrollbar */
 .custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
+  width: 6px;
+  height: 6px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-track {
@@ -71,16 +145,20 @@ input {
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #d4d4d0;
+  @apply bg-muted-foreground/30;
   border-radius: 10px;
 }
 
-/* Typing indicator — Claude-style pulsing dots */
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  @apply bg-muted-foreground/50;
+}
+
+/* Typing indicator — Professional pulsing dots */
 .typing-dot {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: #d97757;
+  @apply bg-foreground/60;
   animation: typingPulse 1.4s ease-in-out infinite;
 }
 
@@ -93,7 +171,7 @@ input {
 .streaming-cursor::after {
   content: "▎";
   animation: cursorBlink 1s step-end infinite;
-  color: #d97757;
+  @apply text-foreground/70;
   font-weight: 300;
 }
 

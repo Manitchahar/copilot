@@ -6,6 +6,7 @@ import { classifyToolEvent } from "./classifyToolEvent";
  * A message is: { id, role, blocks: [block, ...], timestamp }
  * Block types:
  *   { type: "text", content: string }
+ *   { type: "tool-run", tools: [tool, ...], latestIntent, latestText, latestToolName, status }
  *   { type: "tool", toolCallId, toolName, arguments, status, resultText, errorText }
  *   { type: "tool-group", tools: [tool, ...] }
  *   { type: "typing" }
@@ -23,9 +24,16 @@ export function createInitialState() {
 function findOrCreateAssistantMsg(state) {
   const last = state.messages[state.messages.length - 1];
   if (last && last.role === "assistant" && last.id === state.streamingMsgId) {
-    const cloned = { ...last, blocks: last.blocks.map((b) =>
-      b.type === "text" ? { ...b } : b.type === "tool-group" ? { ...b, tools: [...b.tools] } : { ...b }
-    )};
+    const cloned = {
+      ...last,
+      blocks: last.blocks.map((b) =>
+        b.type === "text"
+          ? { ...b }
+          : b.type === "tool-group" || b.type === "tool-run"
+            ? { ...b, tools: b.tools.map((tool) => ({ ...tool })) }
+            : { ...b }
+      ),
+    };
     state.messages[state.messages.length - 1] = cloned;
     return cloned;
   }
@@ -54,9 +62,21 @@ function appendTextDelta(msg, delta) {
   }
 }
 
+function closeFinishedToolRuns(msg) {
+  msg.blocks = msg.blocks.map((block) =>
+    block.type === "tool-run" && block.status !== "running"
+      ? { ...block, _closed: true }
+      : block
+  );
+}
+
 function findToolBlock(msg, toolCallId) {
   for (const block of msg.blocks) {
     if (block.type === "tool" && block.toolCallId === toolCallId) return block;
+    if (block.type === "tool-run") {
+      const found = block.tools.find((t) => t.toolCallId === toolCallId);
+      if (found) return found;
+    }
     if (block.type === "tool-group") {
       const found = block.tools.find((t) => t.toolCallId === toolCallId);
       if (found) return found;
@@ -65,31 +85,61 @@ function findToolBlock(msg, toolCallId) {
   return null;
 }
 
-function maybeGroupResearch(msg) {
-  const blocks = msg.blocks;
-  const newBlocks = [];
-  let researchRun = [];
-
-  const flushResearch = () => {
-    if (researchRun.length === 0) return;
-    if (researchRun.length === 1) {
-      newBlocks.push(researchRun[0]);
-    } else {
-      newBlocks.push({ type: "tool-group", tools: researchRun });
-    }
-    researchRun = [];
-  };
-
-  for (const block of blocks) {
-    if (block.type === "tool" && classifyToolEvent(block.toolName) === "research") {
-      researchRun.push(block);
-    } else {
-      flushResearch();
-      newBlocks.push(block);
+function findToolRunBlock(msg, toolCallId) {
+  for (const block of msg.blocks) {
+    if (block.type !== "tool-run") continue;
+    if (!toolCallId || block.tools.some((tool) => tool.toolCallId === toolCallId)) {
+      return block;
     }
   }
-  flushResearch();
-  msg.blocks = newBlocks;
+  return null;
+}
+
+function updateToolRunStatus(run) {
+  if (!run?.tools?.length) {
+    run.status = "running";
+    return;
+  }
+  if (run.tools.some((tool) => tool.status === "error")) {
+    run.status = "error";
+    return;
+  }
+  if (run.tools.some((tool) => tool.status === "running")) {
+    run.status = "running";
+    return;
+  }
+  run.status = "complete";
+}
+
+function trimSummary(text) {
+  if (!text) return "";
+  const compact = String(text).replace(/\s+/g, " ").trim();
+  if (compact.length <= 120) return compact;
+  return `${compact.slice(0, 117)}...`;
+}
+
+function buildToolSummary(toolName, content) {
+  const summary = trimSummary(content);
+  if (summary) return summary;
+  const toolClass = classifyToolEvent(toolName);
+  if (toolClass === "research") return "Searching workspace";
+  return toolName ? `Running ${toolName}` : "Running tools";
+}
+
+function ensureToolRun(msg) {
+  const last = msg.blocks[msg.blocks.length - 1];
+  if (last?.type === "tool-run" && !last._closed) return last;
+  const run = {
+    type: "tool-run",
+    tools: [],
+    latestIntent: "",
+    latestText: "",
+    latestToolName: "",
+    status: "running",
+    _closed: false,
+  };
+  msg.blocks.push(run);
+  return run;
 }
 
 export function processEvent(state, type, data) {
@@ -118,6 +168,7 @@ export function processEvent(state, type, data) {
 
     case "assistant_message": {
       const msg = findOrCreateAssistantMsg(next);
+      closeFinishedToolRuns(msg);
       const content = data?.content || "";
       const tb = lastTextBlock(msg);
       if (tb) {
@@ -131,8 +182,8 @@ export function processEvent(state, type, data) {
 
     case "tool_start": {
       const msg = findOrCreateAssistantMsg(next);
-      msg.blocks.push({
-        type: "tool",
+      const run = ensureToolRun(msg);
+      run.tools.push({
         toolCallId: data?.tool_call_id,
         toolName: data?.tool_name || "tool",
         arguments: data?.arguments || "",
@@ -140,6 +191,19 @@ export function processEvent(state, type, data) {
         resultText: null,
         errorText: null,
       });
+      run.latestToolName = data?.tool_name || "tool";
+      run.latestText = buildToolSummary(run.latestToolName, data?.arguments);
+      updateToolRunStatus(run);
+      break;
+    }
+
+    case "assistant_intent": {
+      const msg = findOrCreateAssistantMsg(next);
+      const run = findToolRunBlock(msg);
+      if (run) {
+        run.latestIntent = trimSummary(data?.intent);
+        updateToolRunStatus(run);
+      }
       break;
     }
 
@@ -147,8 +211,14 @@ export function processEvent(state, type, data) {
     case "tool_progress": {
       const msg = findOrCreateAssistantMsg(next);
       const tool = findToolBlock(msg, data?.tool_call_id);
+      const run = findToolRunBlock(msg, data?.tool_call_id);
       if (tool) {
         tool.resultText = data?.content || tool.resultText;
+      }
+      if (run) {
+        run.latestToolName = tool?.toolName || data?.tool_name || run.latestToolName;
+        run.latestText = buildToolSummary(run.latestToolName, data?.content);
+        updateToolRunStatus(run);
       }
       break;
     }
@@ -156,12 +226,20 @@ export function processEvent(state, type, data) {
     case "tool_complete": {
       const msg = findOrCreateAssistantMsg(next);
       const tool = findToolBlock(msg, data?.tool_call_id);
+      const run = findToolRunBlock(msg, data?.tool_call_id);
       if (tool) {
         tool.status = data?.success ? "complete" : "error";
         tool.resultText = data?.result_text || tool.resultText;
         tool.errorText = data?.error_text || tool.errorText;
       }
-      maybeGroupResearch(msg);
+      if (run) {
+        run.latestToolName = tool?.toolName || data?.tool_name || run.latestToolName;
+        run.latestText = buildToolSummary(
+          run.latestToolName,
+          data?.error_text || data?.result_text || `${run.latestToolName || "Tool"} completed`
+        );
+        updateToolRunStatus(run);
+      }
       break;
     }
 
@@ -214,7 +292,6 @@ export function processEvent(state, type, data) {
         const msg = next.messages.find((m) => m.id === next.streamingMsgId);
         if (msg) {
           msg._streaming = false;
-          maybeGroupResearch(msg);
         }
       }
       next.streamingMsgId = null;

@@ -1,10 +1,12 @@
 {
-  "name": "copilot-pages-migration",
+  "name": "rocky-operator-console",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "description": "A local-first GitHub Copilot SDK UI for interactive sessions, approvals, and MCP-ready workflows.",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node ./scripts/dev.mjs",
+    "dev:web": "vite --host 127.0.0.1 --port 5173",
     "dev:api": "./.venv/bin/python -m uvicorn api:app --host 127.0.0.1 --port 8000 --reload",
     "build": "vite build",
     "preview": "vite preview"

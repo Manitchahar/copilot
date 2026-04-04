@@ -1,4 +1,4 @@
-// Centralised API client for the Claude Cowork FastAPI backend.
+// Centralised API client for Rocky — The Operator backend.
 
 function resolveApiBase() {
   const configured = import.meta.env.VITE_API_URL;
@@ -38,6 +38,7 @@ export const createSession = () => request("POST", "/sessions");
 export const listSessions = () => request("GET", "/sessions");
 export const getSession = (id) => request("GET", `/sessions/${id}`);
 export const deleteSession = (id) => request("DELETE", `/sessions/${id}`);
+export const warmupSession = (id) => request("POST", `/sessions/${id}/warmup`);
 
 // ── Prompt / Approvals / Input ───────────────────────────
 export const sendPrompt = (id, prompt, attachments = null, mode = "run") =>
@@ -61,9 +62,6 @@ export const abortTurn = (id) =>
 
 export const getHistory = (id) =>
   request("GET", `/sessions/${id}/history`);
-
-export const uploadAttachments = (files) =>
-  request("POST", "/uploads", { files });
 
 // ── Connector Config ─────────────────────────────────────
 export const getConnectorConfig = () => request("GET", "/config/connectors");

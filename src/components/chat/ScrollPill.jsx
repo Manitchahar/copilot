@@ -8,7 +8,7 @@ export default memo(function ScrollPill({ visible, onClick }) {
       className={cn(
         "absolute bottom-4 left-1/2 -translate-x-1/2 z-10",
         "flex items-center gap-1.5 rounded-full px-4 py-2",
-        "bg-on-surface/80 text-white shadow-lg backdrop-blur-sm",
+        "bg-foreground/80 text-white shadow-lg backdrop-blur-sm",
         "text-xs font-medium",
         "transition-all duration-200",
         visible

@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useState } from "react";
 import { useAutoResize } from "../../hooks/useAutoResize";
 import { cn } from "../ui/cn";
 
@@ -19,14 +19,14 @@ export default React.memo(function ChatInput({
   onSendModeChange,
   queuedCount = 0,
   attachments = [],
-  isUploading = false,
-  onAttachFiles,
+  onAttachPath,
   onRemoveAttachment,
 }) {
   const { ref, resize } = useAutoResize(6);
-  const fileInputRef = useRef(null);
-  const directoryInputRef = useRef(null);
-  const [isDragActive, setIsDragActive] = useState(false);
+  const [showPathInput, setShowPathInput] = useState(false);
+  const [pathValue, setPathValue] = useState("");
+  const [pathKind, setPathKind] = useState("file");
+  const [isAddingPath, setIsAddingPath] = useState(false);
 
   const handleChange = useCallback(
     (e) => {
@@ -40,7 +40,7 @@ export default React.memo(function ChatInput({
     (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        if (!disabled && !isUploading && (value.trim() || attachments.length > 0)) {
+        if (!disabled && (value.trim() || attachments.length > 0)) {
           onSend(value.trim(), sendMode);
         }
       }
@@ -49,64 +49,27 @@ export default React.memo(function ChatInput({
         resize();
       }
     },
-    [attachments.length, disabled, isUploading, value, onSend, onChange, resize, sendMode]
+    [attachments.length, disabled, value, onSend, onChange, resize, sendMode]
   );
 
-  const handleAttach = useCallback(
-    (fileList) => {
-      const files = Array.from(fileList || []);
-      if (!files.length) return;
-      onAttachFiles?.(files);
-    },
-    [onAttachFiles]
-  );
-
-  const handlePaste = useCallback(
-    (e) => {
-      const files = Array.from(e.clipboardData?.files || []);
-      if (!files.length) return;
-      e.preventDefault();
-      handleAttach(files);
-    },
-    [handleAttach]
-  );
-
-  const handleDrop = useCallback(
-    (e) => {
-      e.preventDefault();
-      setIsDragActive(false);
-      const files = Array.from(e.dataTransfer?.files || []);
-      if (!files.length) return;
-      handleAttach(files);
-    },
-    [handleAttach]
-  );
+  const handleAttachPathSubmit = useCallback(async () => {
+    const val = pathValue.trim();
+    if (!val || !onAttachPath) return;
+    setIsAddingPath(true);
+    try {
+      const attached = await onAttachPath(val, pathKind);
+      if (attached !== false) {
+        setPathValue("");
+        setShowPathInput(false);
+      }
+    } finally {
+      setIsAddingPath(false);
+    }
+  }, [onAttachPath, pathKind, pathValue]);
 
   return (
-    <div className="border-t border-outline-variant/20 bg-[#f3f3ee] px-4 py-4">
+    <div className="border-t border-border/20 bg-background px-4 py-4">
       <div className="mx-auto max-w-[48rem]">
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          className="hidden"
-          onChange={(e) => {
-            handleAttach(e.target.files);
-            e.target.value = "";
-          }}
-        />
-        <input
-          ref={directoryInputRef}
-          type="file"
-          multiple
-          directory=""
-          webkitdirectory=""
-          className="hidden"
-          onChange={(e) => {
-            handleAttach(e.target.files);
-            e.target.value = "";
-          }}
-        />
         <div className="mb-3 flex flex-wrap items-center gap-2">
           {Object.entries(SEND_MODE_LABELS).map(([mode, label]) => (
             <button
@@ -116,8 +79,8 @@ export default React.memo(function ChatInput({
               className={cn(
                 "rounded-full border px-3 py-1.5 text-xs transition-colors",
                 sendMode === mode
-                  ? "border-primary bg-primary text-on-primary"
-                  : "border-outline-variant/30 bg-white text-muted-foreground hover:bg-surface"
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border/30 bg-white text-muted-foreground hover:bg-background"
               )}
             >
               {label}
@@ -128,31 +91,74 @@ export default React.memo(function ChatInput({
               {queuedCount} queued
             </span>
           )}
-          {isUploading && (
-            <span className="rounded-full bg-blue-50 px-3 py-1.5 text-xs text-blue-700">
-              Uploading attachments…
-            </span>
-          )}
         </div>
+
+        {showPathInput && (
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-border/20 bg-white px-3 py-3 shadow-sm">
+            <div className="inline-flex rounded-full border border-border/20 bg-card p-1 text-xs">
+              {[
+                ["file", "File"],
+                ["directory", "Folder"],
+              ].map(([kind, label]) => (
+                <button
+                  key={kind}
+                  type="button"
+                  onClick={() => setPathKind(kind)}
+                  className={cn(
+                    "rounded-full px-3 py-1 transition-colors",
+                    pathKind === kind ? "bg-primary text-primary-foreground" : "text-muted-foreground"
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <input
+              value={pathValue}
+              onChange={(e) => setPathValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleAttachPathSubmit();
+                }
+                if (e.key === "Escape") {
+                  setShowPathInput(false);
+                  setPathValue("");
+                }
+              }}
+              placeholder={pathKind === "directory" ? "~/Downloads/project" : "./report.csv"}
+              className="min-w-[16rem] flex-1 rounded-full border border-border/20 bg-background px-4 py-2 text-sm text-foreground outline-none focus:border-primary/40"
+            />
+            <button
+              type="button"
+              onClick={handleAttachPathSubmit}
+              disabled={!pathValue.trim() || isAddingPath}
+              className="rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-40"
+            >
+              {isAddingPath ? "Adding…" : "Attach"}
+            </button>
+          </div>
+        )}
+
         {attachments.length > 0 && (
           <div className="mb-3 flex flex-wrap gap-2">
-            {attachments.map((attachment) => (
+            {attachments.map((att) => (
               <span
-                key={attachment.id}
-                className="inline-flex items-center gap-2 rounded-full border border-outline-variant/20 bg-white px-3 py-1.5 text-xs text-on-surface shadow-sm"
+                key={att.id}
+                className="inline-flex items-center gap-2 rounded-full border border-border/20 bg-white px-3 py-1.5 text-xs text-foreground shadow-sm"
               >
                 <span className="material-symbols-outlined text-[15px] text-muted-foreground">
-                  {attachment.media_type?.startsWith("image/") ? "image" : "attach_file"}
+                  {att.attachment?.type === "directory" ? "folder" : "description"}
                 </span>
-                <span className="max-w-[14rem] truncate">{attachment.name}</span>
-                {attachment.sizeLabel && (
-                  <span className="text-muted-foreground">{attachment.sizeLabel}</span>
+                <span className="max-w-[14rem] truncate">{att.name}</span>
+                {att.sizeLabel && (
+                  <span className="text-muted-foreground">{att.sizeLabel}</span>
                 )}
                 <button
                   type="button"
-                  onClick={() => onRemoveAttachment?.(attachment.id)}
-                  className="text-muted-foreground transition-colors hover:text-on-surface"
-                  aria-label={`Remove ${attachment.name}`}
+                  onClick={() => onRemoveAttachment?.(att.id)}
+                  className="text-muted-foreground transition-colors hover:text-foreground"
+                  aria-label={`Remove ${att.name}`}
                 >
                   <span className="material-symbols-outlined text-[15px]">close</span>
                 </button>
@@ -160,53 +166,34 @@ export default React.memo(function ChatInput({
             ))}
           </div>
         )}
+
         <div
-          onDragOver={(e) => {
-            e.preventDefault();
-            setIsDragActive(true);
-          }}
-          onDragLeave={(e) => {
-            if (e.currentTarget.contains(e.relatedTarget)) return;
-            setIsDragActive(false);
-          }}
-          onDrop={handleDrop}
-          className={cn(
-            "flex items-end gap-3 rounded-2xl border bg-white px-4 py-3 shadow-sm",
-            "border-outline-variant/30",
-            "focus-within:border-primary/40 focus-within:shadow-md transition-all duration-200",
-            isDragActive && "border-primary bg-primary-fixed/15 shadow-md"
-          )}
+          className="flex items-end gap-3 rounded-2xl border border-border/30 bg-white px-4 py-3 shadow-sm focus-within:border-primary/40 focus-within:shadow-md transition-all duration-200"
         >
-          <div className="flex shrink-0 items-center gap-1 pb-1">
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-surface hover:text-on-surface"
-              title="Attach files"
-            >
-              <span className="material-symbols-outlined text-[18px]">attach_file</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => directoryInputRef.current?.click()}
-              className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-surface hover:text-on-surface"
-              title="Attach folder"
-            >
-              <span className="material-symbols-outlined text-[18px]">folder</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowPathInput((v) => !v)}
+            className={cn(
+              "flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors mb-0.5",
+              showPathInput
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:bg-background hover:text-foreground"
+            )}
+            title="Attach file or folder path"
+          >
+            <span className="material-symbols-outlined text-[18px]">attach_file</span>
+          </button>
           <textarea
             ref={ref}
             value={value}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
             disabled={disabled}
-            placeholder="Message Claude Cowork or paste/drop files…"
+            placeholder="Message Rocky…"
             rows={1}
             className={cn(
-              "flex-1 resize-none bg-transparent text-[15px] leading-relaxed text-on-surface",
-              "placeholder:text-on-surface/35 outline-none",
+              "flex-1 resize-none bg-transparent text-[15px] leading-relaxed text-foreground",
+              "placeholder:text-foreground/35 outline-none",
               "disabled:opacity-40 disabled:cursor-not-allowed"
             )}
           />
@@ -214,7 +201,7 @@ export default React.memo(function ChatInput({
             <button
               type="button"
               onClick={onAbort}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-on-surface/80 text-white transition-colors hover:bg-on-surface"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-foreground/80 text-white transition-colors hover:bg-foreground"
               title="Stop"
             >
               <span className="material-symbols-outlined text-[16px]">stop</span>
@@ -223,12 +210,12 @@ export default React.memo(function ChatInput({
             <button
               type="button"
               onClick={() => (value.trim() || attachments.length > 0) && onSend(value.trim(), sendMode)}
-              disabled={disabled || isUploading || (!value.trim() && attachments.length === 0)}
+              disabled={disabled || (!value.trim() && attachments.length === 0)}
               className={cn(
                 "flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all duration-150",
                 value.trim() || attachments.length > 0
                   ? "bg-primary text-white hover:bg-primary/85"
-                  : "bg-on-surface/10 text-on-surface/30 cursor-not-allowed"
+                  : "bg-foreground/10 text-foreground/30 cursor-not-allowed"
               )}
               title={SEND_MODE_LABELS[sendMode]}
             >

@@ -1,11 +1,17 @@
 import React, { Suspense, lazy } from "react";
 import { cn } from "../ui/cn";
-import ToolEventCard from "../tools/ToolEventCard";
-import ToolGroupSummary from "../tools/ToolGroupSummary";
+import ToolRunSummary from "../tools/ToolRunSummary";
 import SubagentCard from "../agents/SubagentCard";
 import SkillBadge from "../agents/SkillBadge";
 
 const MarkdownContent = lazy(() => import("./MarkdownContent"));
+
+function looksLikeMarkdown(content) {
+  if (!content) return false;
+  return /(^|\n)\s*(#{1,6}\s|[-*+]\s|\d+\.\s|>\s)|```|`[^`]+`|\|.+\||\[[^\]]+\]\([^)]+\)|\n---+\n/.test(
+    content
+  );
+}
 
 function BlockRenderer({ block, isStreaming, isUser }) {
   switch (block.type) {
@@ -13,15 +19,39 @@ function BlockRenderer({ block, isStreaming, isUser }) {
       if (isUser) {
         return <p className="whitespace-pre-wrap leading-[1.7]">{block.content}</p>;
       }
+      if (!looksLikeMarkdown(block.content)) {
+        return <p className="whitespace-pre-wrap leading-[1.7]">{block.content}</p>;
+      }
       return (
         <Suspense fallback={<p className="whitespace-pre-wrap leading-[1.7]">{block.content}</p>}>
           <MarkdownContent content={block.content} isStreaming={isStreaming} />
         </Suspense>
       );
+    case "tool-run":
+      return <ToolRunSummary block={block} />;
     case "tool":
-      return <ToolEventCard tool={block} />;
+      return (
+        <ToolRunSummary
+          block={{
+            type: "tool-run",
+            tools: [block],
+            latestIntent: "",
+            latestText: block.errorText || block.resultText || "",
+            latestToolName: block.toolName,
+            status: block.status,
+          }}
+        />
+      );
     case "tool-group":
-      return <ToolGroupSummary tools={block.tools} />;
+      return (
+        <ToolRunSummary
+          block={{
+            type: "tool-run",
+            tools: block.tools,
+            latestIntent: "",
+          }}
+        />
+      );
     case "subagent":
       return <SubagentCard block={block} />;
     case "skill":
@@ -60,8 +90,8 @@ export default React.memo(function MessageBubble({ message, isFirstInGroup, isLa
         className={cn(
           "max-w-[48rem]",
           isUser
-            ? "rounded-2xl bg-surface-container-high/60 px-5 py-3 text-on-surface"
-            : "text-on-surface",
+            ? "rounded-2xl bg-muted/60 px-5 py-3 text-foreground"
+            : "text-foreground",
         )}
       >
         {blocks.map((block, i) => (

@@ -27,7 +27,7 @@ const components = {
 
     return (
       <code
-        className="rounded-md border border-outline-variant/40 bg-surface-container-high/50 px-1.5 py-0.5 font-mono text-[0.875em] text-on-surface"
+        className="rounded-md border border-border/40 bg-muted/50 px-1.5 py-0.5 font-mono text-[0.875em] text-foreground"
         {...props}
       >
         {children}
@@ -48,38 +48,38 @@ const components = {
   },
   table({ children }) {
     return (
-      <div className="my-4 overflow-x-auto rounded-lg border border-outline-variant/40">
+      <div className="my-4 overflow-x-auto rounded-lg border border-border/40">
         <table className="min-w-full text-sm">{children}</table>
       </div>
     );
   },
   th({ children }) {
     return (
-      <th className="border-b border-outline-variant/40 bg-surface-container-high/30 px-4 py-2.5 text-left text-[13px] font-semibold text-on-surface/80">
+      <th className="border-b border-border/40 bg-muted/30 px-4 py-2.5 text-left text-[13px] font-semibold text-foreground/80">
         {children}
       </th>
     );
   },
   td({ children }) {
     return (
-      <td className="border-b border-outline-variant/20 px-4 py-2.5 text-[14px]">{children}</td>
+      <td className="border-b border-border/20 px-4 py-2.5 text-[14px]">{children}</td>
     );
   },
   blockquote({ children }) {
     return (
-      <blockquote className="my-4 border-l-[3px] border-primary/30 pl-4 text-on-surface/70">
+      <blockquote className="my-4 border-l-[3px] border-primary/30 pl-4 text-foreground/70">
         {children}
       </blockquote>
     );
   },
   hr() {
-    return <hr className="my-6 border-outline-variant/30" />;
+    return <hr className="my-6 border-border/30" />;
   },
   ul({ children }) {
-    return <ul className="my-3 list-disc space-y-1.5 pl-6 marker:text-on-surface/30">{children}</ul>;
+    return <ul className="my-3 list-disc space-y-1.5 pl-6 marker:text-foreground/30">{children}</ul>;
   },
   ol({ children }) {
-    return <ol className="my-3 list-decimal space-y-1.5 pl-6 marker:text-on-surface/40">{children}</ol>;
+    return <ol className="my-3 list-decimal space-y-1.5 pl-6 marker:text-foreground/40">{children}</ol>;
   },
   h1({ children }) {
     return <h1 className="mb-3 mt-6 text-2xl font-semibold tracking-tight">{children}</h1>;
@@ -101,7 +101,7 @@ const components = {
 export default React.memo(function MarkdownContent({ content, isStreaming = false }) {
   return (
     <div className={cn(
-      "prose-claude text-[15.5px] leading-[1.7] text-on-surface",
+      "prose-claude text-[15.5px] leading-[1.7] text-foreground",
       isStreaming && "streaming-cursor"
     )}>
       <ReactMarkdown

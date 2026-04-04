@@ -43,7 +43,7 @@ export default function MessageList({ messages, isTyping, pendingRequests, rende
                   auto_awesome
                 </span>
               </div>
-              <p className="text-lg font-medium text-on-surface/50">
+              <p className="text-lg font-medium text-foreground/50">
                 How can I help you today?
               </p>
             </div>
@@ -51,6 +51,12 @@ export default function MessageList({ messages, isTyping, pendingRequests, rende
 
           {groups.map((group, i) => (
             <MessageGroup key={group[0].id || i} messages={group} />
+          ))}
+
+          {pendingRequests?.map((req) => (
+            <div key={req.request_id} className="mt-6">
+              {renderPendingRequest(req)}
+            </div>
           ))}
 
           {isTyping && (
@@ -65,12 +71,6 @@ export default function MessageList({ messages, isTyping, pendingRequests, rende
               </div>
             </div>
           )}
-
-          {pendingRequests?.map((req) => (
-            <div key={req.request_id} className="mt-6">
-              {renderPendingRequest(req)}
-            </div>
-          ))}
 
           <div ref={sentinelRef} className="h-1" />
         </div>

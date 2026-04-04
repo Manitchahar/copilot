@@ -1,20 +1,24 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
-import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   abortTurn,
   connectEvents,
+  deleteSession,
   getHistory,
   getSession,
   sendApproval,
   sendPrompt,
   sendUserInput,
-  uploadAttachments,
+  warmupSession,
+  listSessions,
 } from "../api";
+import { cn } from "../components/ui/cn";
 import { createInitialState, hydrateStateFromHistory, processEvent } from "../lib/blockBuilder";
 import MessageList from "../components/chat/MessageList";
 import ChatInput from "../components/chat/ChatInput";
 import PermissionCard from "../components/tools/PermissionCard";
 import MCPStatusPanel from "../components/agents/MCPStatusPanel";
+import CapabilitiesPanel from "../components/agents/CapabilitiesPanel";
 import useConnectorConfig from "../hooks/useConnectorConfig";
 
 const ConnectorsPanel = lazy(() => import("../components/connectors/ConnectorsPanel"));
@@ -36,6 +40,8 @@ function summariseEvent(type, data = {}) {
       return "Writing response";
     case "assistant_message":
       return "Response received";
+    case "assistant_intent":
+      return data.intent ? trimStatusText(data.intent, 90) : "Working";
     case "tool_start":
       return data.tool_name ? `Running ${data.tool_name}` : "Running tool";
     case "tool_progress":
@@ -49,11 +55,15 @@ function summariseEvent(type, data = {}) {
     case "permission_requested":
       return data.tool_name
         ? `Waiting for permission: ${data.tool_name}`
-        : "Waiting for permission";
+        : data.message
+          ? trimStatusText(data.message, 90)
+          : "Waiting for permission";
     case "permission_decision":
       return data.decision ? `Permission ${data.decision}` : "Permission updated";
     case "input_requested":
-      return data.question ? trimStatusText(data.question, 90) : "Waiting for input";
+      return data.question || data.message
+        ? trimStatusText(data.question || data.message, 90)
+        : "Waiting for your input";
     case "input_received":
       return "Input received";
     case "turn_retry":
@@ -100,53 +110,27 @@ function statusToneClasses(tone) {
     case "working":
       return {
         dot: "bg-primary",
-        card: "border-primary/20 bg-primary-fixed/30",
-        text: "text-on-primary-fixed",
+        card: "border-primary/20 bg-primary/10",
+        text: "text-primary",
       };
     default:
       return {
         dot: "bg-green-500",
-        card: "border-outline-variant/30 bg-surface-container-lowest",
+        card: "border-border/30 bg-card",
         text: "text-muted-foreground",
       };
   }
 }
 
-function formatBytes(bytes = 0) {
-  if (!bytes) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  let value = bytes;
-  let index = 0;
-  while (value >= 1024 && index < units.length - 1) {
-    value /= 1024;
-    index += 1;
-  }
-  return `${value >= 10 || index === 0 ? Math.round(value) : value.toFixed(1)} ${units[index]}`;
-}
-
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = String(reader.result || "");
-      const [, base64] = result.split(",", 2);
-      resolve(base64 || "");
-    };
-    reader.onerror = () => reject(reader.error || new Error(`Failed to read ${file.name}`));
-    reader.readAsDataURL(file);
-  });
-}
-
 export default function ActiveSessionPage() {
+  const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const sessionId = searchParams.get("id");
   const resumeRequested = searchParams.get("resume") === "1";
   const initialPrompt = location.state?.initialPrompt || null;
-  const commandRoute = sessionId ? `/commands?sessionId=${encodeURIComponent(sessionId)}` : "/commands";
   const sidebarItems = [
     { icon: "monitoring", label: "Monitor", id: "chat" },
-    { icon: "terminal", label: "Commands", href: commandRoute },
     { icon: "hub", label: "Connectors", id: "connectors" },
     { icon: "home", label: "Workspace", href: "/" },
   ];
@@ -161,6 +145,7 @@ export default function ActiveSessionPage() {
   const [statusText, setStatusText] = useState("Connecting to session");
   const [statusTone, setStatusTone] = useState("ready");
   const [activityLog, setActivityLog] = useState([]);
+  const [sidebarSessions, setSidebarSessions] = useState([]);
   const [sessionTitle, setSessionTitle] = useState("Untitled session");
   const [sessionMeta, setSessionMeta] = useState({
     engine: "copilot-sdk",
@@ -175,7 +160,7 @@ export default function ActiveSessionPage() {
   const [sendMode, setSendMode] = useState("run");
   const [queuedPrompts, setQueuedPrompts] = useState([]);
   const [draftAttachments, setDraftAttachments] = useState([]);
-  const [isUploading, setIsUploading] = useState(false);
+  const [deletingSessionId, setDeletingSessionId] = useState(null);
 
   // Sidebar state (populated from events)
   const [activeTools, setActiveTools] = useState([]); // running tool names
@@ -227,22 +212,77 @@ export default function ActiveSessionPage() {
   const reconnectAttemptRef = useRef(0);
   const manualCloseRef = useRef(false);
   const initialPromptSentRef = useRef(false);
+  const latestInputHintRef = useRef("");
 
   useEffect(() => {
-    document.title = "Cloud Cowork Active Session";
+    document.title = "Rocky — Session";
+  }, []);
+
+  const applyAcceptedPromptState = useCallback((result, promptText, requestedMode = "run") => {
+    if (!result) return;
+    const compactPrompt = trimStatusText(promptText, 72);
+    if (result.started) {
+      setStatusTone("working");
+      setStatusText(compactPrompt ? `Working on: ${compactPrompt}` : "Working on your request");
+      setError(null);
+      return;
+    }
+    if (result.queued) {
+      const queuedItem = {
+        id: result.queue_id || `${Date.now()}-${Math.random()}`,
+        prompt: promptText,
+        mode: result.mode || requestedMode,
+        attachment_count: 0,
+      };
+      setQueuedPrompts((prev) =>
+        prev.some((item) => item.id === queuedItem.id)
+          ? prev
+          : queuedItem.mode === "immediate"
+            ? [queuedItem, ...prev]
+            : [...prev, queuedItem]
+      );
+      if (result.deferred) {
+        setStatusTone("working");
+        setStatusText(
+          compactPrompt
+            ? `Starting session… queued: ${compactPrompt}`
+            : "Starting session…"
+        );
+      } else if ((result.mode || requestedMode) === "immediate") {
+        setStatusTone("working");
+        setStatusText(
+          compactPrompt
+            ? `Steer next queued: ${compactPrompt}`
+            : "Priority prompt queued"
+        );
+      } else {
+        setStatusTone("blocked");
+        setStatusText(
+          compactPrompt
+            ? `Queued: ${compactPrompt}`
+            : "Prompt queued"
+        );
+      }
+      setError(null);
+    }
   }, []);
 
   useEffect(() => {
     if (!sessionId || !initialPrompt || initialPromptSentRef.current) return;
     initialPromptSentRef.current = true;
+    setStatusTone("working");
+    setStatusText("Starting session…");
     sendPrompt(sessionId, initialPrompt)
+      .then((result) => {
+        applyAcceptedPromptState(result, initialPrompt, "run");
+      })
       .catch(() => {
         setError("Could not start the initial prompt");
         setStatusTone("error");
         setStatusText("Initial prompt failed");
         initialPromptSentRef.current = false;
       });
-  }, [initialPrompt, sessionId]);
+  }, [applyAcceptedPromptState, initialPrompt, sessionId]);
 
   // ── Extract artifacts / folders from tool events ───────
   const processToolComplete = useCallback((data) => {
@@ -351,12 +391,12 @@ export default function ActiveSessionPage() {
     setPendingRequests([]);
     setQueuedPrompts([]);
     setDraftAttachments([]);
-    setIsUploading(false);
     setSessionTitle("Untitled session");
     setRuntimeStats({ totalTokens: 0, contextUsage: { used: 0, total: 0 } });
     setStatusText("Connecting to session");
     setStatusTone("ready");
     setActivityLog([]);
+    setSidebarSessions([]);
   }, []);
 
   const applySessionData = useCallback(
@@ -399,61 +439,69 @@ export default function ActiveSessionPage() {
     [resumeRequested]
   );
 
-  const loadSessionData = useCallback(
+  const loadSessionSnapshot = useCallback(
     async (options = {}) => {
       if (!sessionId) return null;
-      const [snap, history] = await Promise.all([getSession(sessionId), getHistory(sessionId)]);
-      applySessionData(snap, history, options);
-      return { snap, history };
+      const snap = await getSession(sessionId);
+      applySessionData(snap, null, options);
+      return snap;
     },
     [applySessionData, sessionId]
   );
 
-  const handleAttachFiles = useCallback(
-    async (files) => {
-      if (!files?.length) return;
-      setIsUploading(true);
-      setError(null);
+  const loadSessionHistory = useCallback(
+    async (options = {}) => {
+      if (!sessionId) return null;
       try {
-        const payload = await Promise.all(
-          files.map(async (file) => ({
-            name: file.name,
-            data: await fileToBase64(file),
-            media_type: file.type || "application/octet-stream",
-            relative_path: file.webkitRelativePath || file.name,
-          }))
-        );
-        const response = await uploadAttachments(payload);
-        const nextAttachments = (response.attachments || []).map((attachment, index) => {
-          const file = files[index];
-          return {
-            id: `${attachment.path}-${Date.now()}-${index}`,
-            name: attachment.name || file?.name || "attachment",
-            media_type: attachment.media_type || file?.type || null,
-            sizeLabel: formatBytes(file?.size || response.files?.[index]?.size || 0),
-            attachment,
-          };
-        });
-        setDraftAttachments((prev) => [...prev, ...nextAttachments]);
-        setStatusTone("ready");
-        setStatusText(
-          nextAttachments.length === 1
-            ? `Attached ${nextAttachments[0].name}`
-            : `Attached ${nextAttachments.length} files`
-        );
-      } catch (err) {
-        setError(err.message || "Could not upload attachments");
-        setStatusTone("error");
-        setStatusText("Attachment upload failed");
-      } finally {
-        setIsUploading(false);
+        const snap = await getSession(sessionId);
+        const history = await getHistory(sessionId);
+        applySessionData(snap, history, options);
+        return history;
+      } catch (historyError) {
+        console.error("Failed to load session history:", historyError);
+        return null;
       }
     },
-    []
+    [applySessionData, sessionId]
   );
 
   const handleRemoveAttachment = useCallback((attachmentId) => {
     setDraftAttachments((prev) => prev.filter((item) => item.id !== attachmentId));
+  }, []);
+
+  const refreshSidebarSessions = useCallback(() => {
+    listSessions()
+      .then((data) => setSidebarSessions((data.sessions || []).slice(0, 8)))
+      .catch(() => {});
+  }, []);
+
+  const handleAttachPath = useCallback(async (pathValue, kind = "file") => {
+    const normalized = String(pathValue || "").trim();
+    if (!normalized) return false;
+    const cleaned = normalized.replace(/[\\/]+$/, "") || normalized;
+    const name = cleaned.split(/[\\/]/).pop() || cleaned;
+    const attachment = {
+      type: kind === "directory" ? "directory" : "file",
+      path: normalized,
+      name,
+    };
+    setDraftAttachments((prev) => [
+      ...prev,
+      {
+        id: `${attachment.type}:${normalized}:${Date.now()}`,
+        name,
+        media_type: null,
+        sizeLabel: kind === "directory" ? "Local folder" : "Local path",
+        source: "path",
+        attachment,
+      },
+    ]);
+    setStatusTone("ready");
+    setStatusText(
+      kind === "directory" ? `Attached folder path: ${name}` : `Attached file path: ${name}`
+    );
+    setError(null);
+    return true;
   }, []);
 
   // ── WebSocket connection ───────────────────────────────
@@ -502,7 +550,7 @@ export default function ActiveSessionPage() {
         reconnectTimerRef.current = null;
         if (isReconnect || reconnectAttemptRef.current > 0) {
           try {
-            await loadSessionData({ isReconnect: true });
+            await loadSessionHistory({ isReconnect: true });
           } catch {
             setStatusTone("blocked");
             setStatusText("Live connection restored, waiting to resync");
@@ -597,6 +645,13 @@ export default function ActiveSessionPage() {
             }
             break;
 
+          case "assistant_intent":
+            setStatusTone("working");
+            setStatusText(summariseEvent(type, data));
+            appendActivity(type, data, "working");
+            setMsgState((prev) => processEvent(prev, type, data));
+            break;
+
           case "tool_start":
             setStatusTone("working");
             setStatusText(summariseEvent(type, data));
@@ -680,23 +735,50 @@ export default function ActiveSessionPage() {
             break;
 
           case "input_requested":
-            setStatusTone("blocked");
-            setStatusText(summariseEvent(type, data));
-            appendActivity(type, data, "blocked");
-            enqueuePendingRequest({
-              request_id: data.request_id,
-              kind: "user_input",
-              payload: data,
-            });
+            latestInputHintRef.current = data?.question || data?.message || latestInputHintRef.current;
+            {
+              const payload = {
+                ...data,
+                message: data?.message || latestInputHintRef.current || undefined,
+              };
+              setStatusTone("blocked");
+              setStatusText(summariseEvent(type, payload));
+              appendActivity(type, payload, "blocked");
+              enqueuePendingRequest({
+                request_id: payload.request_id,
+                kind: "user_input",
+                payload,
+              });
+            }
             break;
 
-          case "input_notice":
+          case "input_notice": {
+            const hint = data?.message || data?.question || "";
+            if (hint) {
+              latestInputHintRef.current = hint;
+              setPendingRequests((prev) =>
+                prev.map((req) =>
+                  req.kind === "user_input" &&
+                  (!req.payload?.question && !req.payload?.message)
+                    ? {
+                        ...req,
+                        payload: {
+                          ...req.payload,
+                          message: hint,
+                        },
+                      }
+                    : req
+                )
+              );
+            }
             setStatusTone("blocked");
-            setStatusText(summariseEvent(type, data));
+            setStatusText(hint ? trimStatusText(hint, 90) : summariseEvent(type, data));
             appendActivity(type, data, "blocked");
             break;
+          }
 
           case "input_received":
+            latestInputHintRef.current = "";
             setStatusTone("working");
             setStatusText("Input received");
             appendActivity(type, data);
@@ -802,7 +884,7 @@ export default function ActiveSessionPage() {
       };
     };
 
-    loadSessionData()
+    loadSessionSnapshot()
       .catch(() => {
         if (!cancelled) {
           setError("Failed to load session");
@@ -812,7 +894,10 @@ export default function ActiveSessionPage() {
       })
       .finally(() => {
         if (!cancelled) {
+          warmupSession(sessionId).catch(() => {});
           connectSocket(false);
+          refreshSidebarSessions();
+          loadSessionHistory().catch(() => {});
         }
       });
 
@@ -827,7 +912,9 @@ export default function ActiveSessionPage() {
   }, [
     applySessionData,
     enqueuePendingRequest,
-    loadSessionData,
+    loadSessionHistory,
+    loadSessionSnapshot,
+    refreshSidebarSessions,
     resetSessionState,
     sessionId,
     processToolComplete,
@@ -835,6 +922,8 @@ export default function ActiveSessionPage() {
   ]);
 
   // ── Handlers ───────────────────────────────────────────
+  const handleAbort = useCallback(() => abortTurn(sessionId), [sessionId]);
+
   const handleApproval = useCallback(async (requestId, approved) => {
     try {
       await sendApproval(sessionId, requestId, approved);
@@ -887,8 +976,20 @@ export default function ActiveSessionPage() {
     const outgoingAttachments = draftAttachments.map((item) => item.attachment);
     if (!text && outgoingAttachments.length === 0) return;
     const resolvedMode = busy && mode === "run" ? "enqueue" : mode;
+    const promptText = text || (outgoingAttachments.length ? "Attached files/folders" : "");
+    if (resolvedMode === "run") {
+      setStatusTone("working");
+      setStatusText("Starting session…");
+    }
     sendPrompt(sessionId, text, outgoingAttachments, resolvedMode)
-      .then(() => {
+      .then((result) => {
+        if (result?.error) {
+          throw new Error(result.error);
+        }
+        if (result?.started === false && result?.queued === false) {
+          throw new Error("Prompt was not accepted");
+        }
+        applyAcceptedPromptState(result, promptText, resolvedMode);
         setInputText("");
         setDraftAttachments([]);
         if (busy && mode === "run") {
@@ -898,8 +999,38 @@ export default function ActiveSessionPage() {
       })
       .catch((err) => {
         setError(err.message || "Could not send prompt");
+        setStatusTone("error");
+        setStatusText("Could not send prompt");
       });
-  }, [draftAttachments, busy, sessionId]);
+  }, [applyAcceptedPromptState, draftAttachments, busy, sessionId]);
+
+  const handleDeleteSession = useCallback(
+    async (targetSessionId, { redirectHome = false } = {}) => {
+      if (deletingSessionId) return;
+      const target =
+        sidebarSessions.find((session) => session.id === targetSessionId) ||
+        (targetSessionId === sessionId ? { title: sessionTitle } : null);
+      if (!window.confirm(`Delete ${target?.title || "this session"}?`)) return;
+      setDeletingSessionId(targetSessionId);
+      setError(null);
+      try {
+        await deleteSession(targetSessionId);
+        setSidebarSessions((prev) => prev.filter((session) => session.id !== targetSessionId));
+        if (redirectHome || targetSessionId === sessionId) {
+          navigate("/", { replace: true });
+          return;
+        }
+        refreshSidebarSessions();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not delete the session.");
+        setStatusTone("error");
+        setStatusText("Could not delete session");
+      } finally {
+        setDeletingSessionId(null);
+      }
+    },
+    [deletingSessionId, navigate, refreshSidebarSessions, sessionId, sessionTitle, sidebarSessions]
+  );
 
   // ── No session ID guard ────────────────────────────────
   if (!sessionId) {
@@ -912,7 +1043,7 @@ export default function ActiveSessionPage() {
           <p className="font-newsreader text-xl">No session selected</p>
           <Link
             to="/"
-            className="inline-block rounded-full bg-primary px-6 py-3 font-label text-sm font-bold text-on-primary"
+            className="inline-block rounded-full bg-primary px-6 py-3 font-label text-sm font-bold text-primary-foreground"
           >
             Go to Workspace
           </Link>
@@ -924,22 +1055,22 @@ export default function ActiveSessionPage() {
   const toneClasses = statusToneClasses(statusTone);
 
   return (
-    <div className="h-screen overflow-hidden bg-background text-on-background">
+    <div className="h-screen overflow-hidden bg-background text-foreground">
       <div className="flex h-full overflow-hidden">
         {/* ── Sidebar ─────────────────────────────────── */}
-        <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-outline-variant/30 bg-surface-container-low py-6 md:flex">
-          <div className="mb-10 px-6">
+        <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-border/30 bg-card py-6 md:flex">
+          <div className="mb-6 px-6">
             <Link
               to={`/session?id=${sessionId}`}
               onClick={handleSessionHome}
               className="flex items-center gap-3"
             >
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-on-primary">
-                <span className="material-symbols-outlined">menu_book</span>
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                <span className="material-symbols-outlined">bolt</span>
               </div>
               <div>
-                <h1 className="font-newsreader text-lg font-semibold leading-tight text-on-surface">
-                  Cloud Cowork
+                <h1 className="font-newsreader text-lg font-semibold leading-tight text-foreground">
+                  Rocky
                 </h1>
                 <p className="font-body text-[10px] uppercase tracking-widest text-muted-foreground">
                   {connected ? "Connected" : "Connecting…"}
@@ -948,7 +1079,7 @@ export default function ActiveSessionPage() {
             </Link>
           </div>
 
-          <nav className="flex-1 space-y-1 px-2">
+          <nav className="space-y-1 px-3">
             {sidebarItems.map((item) => {
               const isActive = item.id ? activeView === item.id : false;
               const content = (
@@ -956,14 +1087,14 @@ export default function ActiveSessionPage() {
                   <span className="material-symbols-outlined">
                     {item.icon}
                   </span>
-                  <span className="font-label text-sm uppercase tracking-wide">
+                  <span className="text-sm">
                     {item.label}
                   </span>
                 </>
               );
               const cls = isActive
-                ? "ml-2 flex items-center gap-3 rounded-l-full bg-surface px-4 py-3 font-bold text-primary shadow-sm"
-                : "mx-2 flex items-center gap-3 rounded-full px-6 py-3 text-muted-foreground transition-colors hover:bg-surface-container-high cursor-pointer";
+                ? "flex items-center gap-3 rounded-lg bg-primary/10 px-4 py-2.5 font-medium text-primary"
+                : "flex items-center gap-3 rounded-lg px-4 py-2.5 text-muted-foreground transition-colors hover:bg-muted cursor-pointer";
               if (item.id) {
                 return (
                   <button key={item.label} onClick={() => handleViewChange(item.id)} aria-current={isActive ? "true" : undefined} className={cls}>
@@ -983,11 +1114,64 @@ export default function ActiveSessionPage() {
             })}
           </nav>
 
+          {/* Chat History */}
+          <div className="mt-6 flex-1 overflow-y-auto px-3">
+            <h3 className="mb-2 px-3 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+              History
+            </h3>
+            <div className="space-y-0.5">
+              {sidebarSessions.map((s) => {
+                const isCurrentSession = s.id === sessionId;
+                return (
+                  <div
+                    key={s.id}
+                    className={cn(
+                      "group flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                      isCurrentSession
+                        ? "bg-primary/10 font-medium text-primary"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    )}
+                  >
+                    <Link
+                      to={`/session?id=${s.id}`}
+                      onClick={isCurrentSession ? handleSessionHome : handleRouteLeave}
+                      className="flex min-w-0 flex-1 items-center gap-2.5"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">
+                        {isCurrentSession ? "chat_bubble" : "chat_bubble_outline"}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate">
+                        {s.title || `Session ${s.id.slice(0, 8)}`}
+                      </span>
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSession(s.id, { redirectHome: isCurrentSession })}
+                      disabled={deletingSessionId === s.id}
+                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition-all hover:bg-background hover:text-foreground group-hover:opacity-100 disabled:opacity-40"
+                      aria-label={`Delete ${s.title || "session"}`}
+                      title="Delete session"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">
+                        {deletingSessionId === s.id ? "progress_activity" : "delete"}
+                      </span>
+                    </button>
+                  </div>
+                );
+              })}
+              {sidebarSessions.length === 0 && (
+                <p className="px-3 py-2 text-xs italic text-muted-foreground/50">
+                  No recent sessions
+                </p>
+              )}
+            </div>
+          </div>
+
           <div className="mt-auto px-6">
             <Link
               to="/"
               onClick={handleRouteLeave}
-              className="flex w-full items-center justify-center gap-2 rounded-full bg-primary-container py-4 font-label font-bold text-on-primary-container transition-opacity hover:opacity-90"
+              className="flex w-full items-center justify-center gap-2 rounded-full bg-accent py-4 font-label font-bold text-accent-foreground transition-opacity hover:opacity-90"
             >
               <span className="material-symbols-outlined">add</span>
               New Inquiry
@@ -1002,9 +1186,9 @@ export default function ActiveSessionPage() {
               <Link
                 to={`/session?id=${sessionId}`}
                 onClick={handleSessionHome}
-                className="font-newsreader text-xl font-bold text-on-surface"
+                className="font-newsreader text-xl font-bold text-foreground"
               >
-                Cloud Cowork
+                Rocky
               </Link>
               <nav className="hidden gap-6 lg:flex">
                 <Link
@@ -1013,13 +1197,6 @@ export default function ActiveSessionPage() {
                   className="font-newsreader text-lg italic tracking-tight text-muted-foreground transition-colors hover:text-primary"
                 >
                   Workspace
-                </Link>
-                <Link
-                  to={commandRoute}
-                  onClick={handleRouteLeave}
-                  className="font-newsreader text-lg italic tracking-tight text-muted-foreground transition-colors hover:text-primary"
-                >
-                  Commands
                 </Link>
                 <span className="border-b-2 border-primary pb-1 font-newsreader text-lg italic tracking-tight text-primary">
                   Session
@@ -1036,7 +1213,7 @@ export default function ActiveSessionPage() {
                 />
                 {connected ? "Live" : "Offline"}
               </div>
-              <div className="h-8 w-8 overflow-hidden rounded-full border border-outline-variant">
+              <div className="h-8 w-8 overflow-hidden rounded-full border border-border">
                 <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary/15 to-primary/30 text-[11px] font-semibold text-primary">
                   CW
                 </div>
@@ -1050,9 +1227,9 @@ export default function ActiveSessionPage() {
                 <Suspense
                   fallback={
                     <div className="flex h-full items-center justify-center">
-                      <div className="rounded-[1.25rem] border border-outline-variant/20 bg-surface px-6 py-5 text-center shadow-sm">
-                        <p className="font-medium text-on-surface">Loading connectors…</p>
-                        <p className="mt-1 text-sm text-secondary">Preparing integration settings</p>
+                      <div className="rounded-[1.25rem] border border-border/20 bg-background px-6 py-5 text-center shadow-sm">
+                        <p className="font-medium text-foreground">Loading connectors…</p>
+                        <p className="mt-1 text-sm text-muted-foreground">Preparing integration settings</p>
                       </div>
                     </div>
                   }
@@ -1063,22 +1240,18 @@ export default function ActiveSessionPage() {
             ) : (
             <>
             {/* ── Chat area ────────────────────────────── */}
-            <div className="relative flex min-h-0 flex-1 flex-col border-r border-outline-variant/10 bg-surface">
-              {/* Status card — runtime details live in the sidebar */}
-              <div className="px-4 pt-4 pb-2">
-                <div className={`rounded-[1rem] border px-4 py-3 ${toneClasses.card}`}>
-                  <div className={`flex items-center gap-2 text-sm font-medium ${toneClasses.text}`}>
-                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${toneClasses.dot}`} />
-                    <span className="truncate">{statusText}</span>
-                    <span className="ml-auto shrink-0 rounded-full bg-surface-container px-2.5 py-0.5 text-[11px] font-normal text-muted-foreground">
-                      {sessionMeta.model}
-                    </span>
-                  </div>
-                  {lastTurnError && (
-                    <p className="mt-2 text-sm text-red-700">{lastTurnError}</p>
-                  )}
-                </div>
+            <div className="relative flex min-h-0 flex-1 flex-col border-r border-border/10 bg-background">
+              {/* Compact status line */}
+              <div className="flex items-center gap-2 px-5 pt-3 pb-1">
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${toneClasses.dot}`} />
+                <span className={`truncate text-xs ${toneClasses.text}`}>{statusText}</span>
+                <span className="ml-auto shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                  {sessionMeta.model}
+                </span>
               </div>
+              {lastTurnError && (
+                <p className="px-5 pb-1 text-xs text-red-700">{lastTurnError}</p>
+              )}
 
               {/* Error toast */}
               {error && (
@@ -1097,239 +1270,67 @@ export default function ActiveSessionPage() {
                 value={inputText}
                 onChange={setInputText}
                 onSend={handleSend}
-                onAbort={() => abortTurn(sessionId)}
-                disabled={isUploading}
+                onAbort={handleAbort}
+                disabled={!connected}
                 isBusy={busy}
                 sendMode={sendMode}
                 onSendModeChange={setSendMode}
                 queuedCount={queuedPrompts.length}
                 attachments={draftAttachments}
-                isUploading={isUploading}
-                onAttachFiles={handleAttachFiles}
+                onAttachPath={handleAttachPath}
                 onRemoveAttachment={handleRemoveAttachment}
               />
             </div>
 
             {/* ── Right sidebar ────────────────────────── */}
-            <aside className="custom-scrollbar hidden w-96 shrink-0 flex-col gap-8 overflow-y-auto bg-surface-container-low p-8 lg:flex">
+            <aside className="custom-scrollbar hidden w-96 shrink-0 flex-col gap-4 overflow-y-auto bg-card p-6 lg:flex">
               <div>
-                <h2 className="mb-6 font-newsreader text-xl font-bold text-on-surface">
-                  Session Intelligence
-                </h2>
-
-                {/* Current file */}
-                <div className="mb-10">
-                  <div className="mb-4 flex items-center justify-between">
-                    <h3 className="font-label text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                      Runtime
-                    </h3>
-                    <span className="rounded-full bg-surface px-2 py-0.5 text-[10px] text-muted-foreground">
-                      LIVE
-                    </span>
-                  </div>
-                  <div className="space-y-3 rounded-[1rem] border border-outline-variant/10 bg-surface p-4 shadow-sm">
-                    <RuntimeRow label="Engine" value={sessionMeta.engine} />
-                    <RuntimeRow label="Model" value={sessionMeta.model} />
-                    <RuntimeRow label="Provider" value={sessionMeta.provider} />
-                    <RuntimeRow label="Approvals" value={sessionMeta.approval_mode} />
-                    {sessionMeta.reasoning_effort && (
-                      <RuntimeRow label="Reasoning" value={sessionMeta.reasoning_effort} />
-                    )}
-                    {sessionMeta.working_directory && (
-                      <RuntimeRow label="Workdir" value={sessionMeta.working_directory} />
-                    )}
-                    {sessionMeta.mcp_servers && sessionMeta.mcp_servers.length > 0 && (
-                      <p className="text-xs text-muted-foreground">
-                        MCP: {sessionMeta.mcp_servers.join(", ")}
-                      </p>
-                    )}
-                    {sessionMeta.custom_agents && sessionMeta.custom_agents.length > 0 && (
-                      <p className="text-xs text-muted-foreground">
-                        Agents: {sessionMeta.custom_agents.join(", ")}
-                      </p>
-                    )}
-                  </div>
+                {/* ── 1. Compact status line ──────────────── */}
+                <div className="mb-4 flex items-center gap-2">
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${toneClasses.dot}`} />
+                  <span className={`truncate text-sm font-medium ${toneClasses.text}`}>{statusText}</span>
+                  <span className="ml-auto shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                    {sessionMeta.model}
+                  </span>
                 </div>
-
-                <div className="mb-10">
-                  <div className="mb-4 flex items-center justify-between">
-                    <h3 className="font-label text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                      Session
-                    </h3>
-                  </div>
-                  <div className="rounded-[1rem] border border-outline-variant/10 bg-surface p-4 shadow-sm">
-                    <p className="text-sm font-semibold text-on-surface">
-                      {sessionTitle}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {connected ? "Live session connected" : "Waiting for live connection"}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="mb-10">
-                  <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                    Run Status
-                  </h3>
-                  <div className={`rounded-[1rem] border p-4 ${toneClasses.card}`}>
-                    <div className={`flex items-center gap-2 text-sm font-medium ${toneClasses.text}`}>
-                      <span className={`h-2.5 w-2.5 rounded-full ${toneClasses.dot}`} />
-                      <span>{statusText}</span>
-                    </div>
-                    {lastTurnError && (
-                      <p className="mt-2 text-xs text-red-700">{lastTurnError}</p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="mb-10">
-                  <div className="mb-4 flex items-center justify-between">
-                    <h3 className="font-label text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                      Current File
-                    </h3>
-                    {currentFile && (
-                      <span className="rounded-full bg-primary-fixed px-2 py-0.5 text-[10px] text-primary">
-                        ACTIVE
-                      </span>
-                    )}
-                  </div>
-                  {currentFile ? (
-                    <div className="group flex items-center gap-4 rounded-[1rem] border border-outline-variant/10 bg-surface p-4 shadow-sm">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-[1rem] bg-secondary-container text-on-secondary-container">
-                        <span className="material-symbols-outlined">
-                          description
-                        </span>
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-on-surface">
-                          {currentFile.name}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          via {currentFile.tool}
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-xs italic text-muted-foreground/50">
-                      No files touched yet
-                    </p>
-                  )}
-                </div>
-
-                {/* Artifacts */}
-                {artifacts.length > 0 && (
-                  <div className="mb-10">
-                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                      Project Artifacts
-                    </h3>
-                    <div className="space-y-3">
-                      {artifacts.map((artifact) => (
-                        <div
-                          key={artifact.name}
-                          className="flex items-center gap-4 rounded-[1rem] bg-surface-container p-4 transition-all hover:bg-surface"
-                        >
-                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-tertiary-fixed text-on-tertiary-fixed">
-                            <span className="material-symbols-outlined text-sm">
-                              {artifact.icon}
-                            </span>
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium text-on-surface">
-                              {artifact.name}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              {artifact.meta}
-                            </p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                {lastTurnError && (
+                  <p className="mb-4 text-xs text-red-700">{lastTurnError}</p>
                 )}
 
-                {/* Folders */}
-                {folders.length > 0 && (
-                  <div className="mb-10">
-                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                      Relevant Folders
-                    </h3>
-                    <div className="space-y-2">
-                      {folders.map((folder) => (
+                {/* ── 2. Context meter ────────────────────── */}
+                {runtimeStats.contextUsage.total > 0 && (() => {
+                  const pct = Math.round((runtimeStats.contextUsage.used / runtimeStats.contextUsage.total) * 100);
+                  return (
+                    <div className="mb-6">
+                      <div className="mb-1 flex items-center justify-between">
+                        <span className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Context</span>
+                        <span className="text-[10px] text-muted-foreground">{pct}%</span>
+                      </div>
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
                         <div
-                          key={folder.path}
-                          className="group flex cursor-pointer items-center gap-3 rounded-full p-2 transition-colors hover:bg-surface-container"
-                        >
-                          <span className="material-symbols-outlined text-muted-foreground transition-colors group-hover:text-primary">
-                            {folder.icon}
-                          </span>
-                          <span className="font-body text-sm text-on-surface truncate" title={folder.path}>
-                            {folder.path}
-                          </span>
-                        </div>
-                      ))}
+                          className={`h-full rounded-full transition-all ${pct > 85 ? "bg-red-500" : pct > 60 ? "bg-amber-500" : "bg-primary"}`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
-                {/* Running tools indicator */}
-                {activeTools.length > 0 && (
-                  <div className="mb-10">
-                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                      Active Tools
+                {/* ── 3. Active work (tools + subagents) ──── */}
+                {(activeTools.length > 0 || activeSubagents.length > 0) && (
+                  <div className="mb-6">
+                    <h3 className="mb-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+                      Active Work
                     </h3>
-                    <div className="space-y-2">
+                    <ul className="space-y-1">
                       {activeTools.map((tool) => (
-                        <div
-                          key={tool.id}
-                          className="flex items-center gap-3 rounded-full bg-secondary-container/40 p-3"
-                        >
-                          <span className="h-2 w-2 animate-pulse rounded-full bg-primary" />
-                          <span className="font-label text-xs text-on-secondary-container">
-                            {tool.name}
-                          </span>
-                        </div>
+                        <li key={tool.id} className="flex items-center gap-2 text-xs text-foreground">
+                          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
+                          <span className="truncate">{tool.name}</span>
+                        </li>
                       ))}
-                    </div>
-                  </div>
-                )}
-
-                {queuedPrompts.length > 0 && (
-                  <div className="mb-10">
-                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                      Queued Work
-                    </h3>
-                    <div className="space-y-2">
-                      {queuedPrompts.map((prompt) => (
-                        <div
-                          key={prompt.id}
-                          className="rounded-[1rem] border border-amber-200 bg-amber-50 px-4 py-3 text-sm"
-                        >
-                          <p className="font-medium text-on-surface">
-                            {trimStatusText(prompt.prompt, 90)}
-                          </p>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {prompt.mode === "immediate" ? "Runs next after abort" : "Queued to run next"}
-                            {prompt.attachment_count ? ` • ${prompt.attachment_count} attachment(s)` : ""}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <MCPStatusPanel mcpStatus={mcpStatus} />
-
-                {activeSubagents.length > 0 && (
-                  <div className="mb-10">
-                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                      Active Subagents
-                    </h3>
-                    <ul className="space-y-2">
                       {activeSubagents.map((agent) => (
-                        <li
-                          key={agent.id}
-                          className="flex items-center gap-2 text-xs text-on-surface"
-                        >
+                        <li key={agent.id} className="flex items-center gap-2 text-xs text-foreground">
                           <span
                             className={`h-1.5 w-1.5 rounded-full ${
                               agent.status === "running"
@@ -1347,9 +1348,79 @@ export default function ActiveSessionPage() {
                   </div>
                 )}
 
+                <CapabilitiesPanel
+                  runtime={sessionMeta}
+                  mcpStatus={mcpStatus}
+                  loadedSkills={loadedSkills}
+                />
+
+                {/* ── 4. Current file (compact row) ───────── */}
+                <div className="mb-6">
+                  <h3 className="mb-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+                    Current File
+                  </h3>
+                  {currentFile ? (
+                    <div className="flex items-center gap-2 rounded-lg bg-muted px-3 py-2">
+                      <span className="material-symbols-outlined text-sm text-muted-foreground">description</span>
+                      <span className="min-w-0 flex-1 truncate text-sm text-foreground">{currentFile.name}</span>
+                      <span className="shrink-0 text-[10px] text-muted-foreground">via {currentFile.tool}</span>
+                    </div>
+                  ) : (
+                    <p className="text-xs italic text-muted-foreground/50">No files touched yet</p>
+                  )}
+                </div>
+
+                {/* ── 5. Artifacts (compact rows) ─────────── */}
+                {artifacts.length > 0 && (
+                  <div className="mb-6">
+                    <h3 className="mb-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+                      Artifacts
+                    </h3>
+                    <div className="space-y-1">
+                      {artifacts.map((artifact) => (
+                        <div
+                          key={artifact.name}
+                          className="flex items-center gap-2 rounded-lg px-3 py-1.5 transition-colors hover:bg-muted"
+                        >
+                          <span className="material-symbols-outlined text-sm text-muted-foreground">{artifact.icon}</span>
+                          <span className="min-w-0 flex-1 truncate text-sm text-foreground">{artifact.name}</span>
+                          <span className="shrink-0 text-[10px] text-muted-foreground">{artifact.meta}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── 6. Folders ──────────────────────────── */}
+                {folders.length > 0 && (
+                  <div className="mb-6">
+                    <h3 className="mb-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+                      Relevant Folders
+                    </h3>
+                    <div className="space-y-1">
+                      {folders.map((folder) => (
+                        <div
+                          key={folder.path}
+                          className="group flex items-center gap-2 rounded-full px-2 py-1.5 transition-colors hover:bg-muted"
+                        >
+                          <span className="material-symbols-outlined text-sm text-muted-foreground transition-colors group-hover:text-primary">
+                            {folder.icon}
+                          </span>
+                          <span className="truncate text-sm text-foreground" title={folder.path}>
+                            {folder.path}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <MCPStatusPanel mcpStatus={mcpStatus} />
+
+                {/* ── 7. Skills ───────────────────────────── */}
                 {loadedSkills.length > 0 && (
-                  <div className="mb-10">
-                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                  <div className="mb-6">
+                    <h3 className="mb-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
                       Skills
                     </h3>
                     <div className="flex flex-wrap gap-1">
@@ -1365,63 +1436,26 @@ export default function ActiveSessionPage() {
                   </div>
                 )}
 
-                {activityLog.length > 0 && (
-                  <div className="mb-10">
-                    <h3 className="mb-4 font-label text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                      Recent Activity
+                {/* ── 8. Queued work (simple numbered list) ── */}
+                {queuedPrompts.length > 0 && (
+                  <div className="mb-6">
+                    <h3 className="mb-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+                      Queued Work
                     </h3>
-                    <div className="space-y-2">
-                      {activityLog.map((item) => (
-                        <div
-                          key={item.id}
-                          className="rounded-[1rem] bg-surface px-4 py-3 text-sm text-on-surface shadow-sm"
-                        >
-                          {item.label}
-                        </div>
+                    <ol className="list-inside list-decimal space-y-1 text-sm text-foreground">
+                      {queuedPrompts.map((prompt) => (
+                        <li key={prompt.id} className="truncate">
+                          <span>{trimStatusText(prompt.prompt, 70)}</span>
+                          {prompt.attachment_count > 0 && (
+                            <span className="ml-1 text-[10px] text-muted-foreground">
+                              ({prompt.attachment_count} file{prompt.attachment_count > 1 ? "s" : ""})
+                            </span>
+                          )}
+                        </li>
                       ))}
-                    </div>
+                    </ol>
                   </div>
                 )}
-              </div>
-
-              {/* Stats footer */}
-              <div className="mt-auto border-t border-outline-variant/10 pt-8">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="text-center">
-                    <p className="font-newsreader text-xl font-bold text-primary">
-                      {queryCount}
-                    </p>
-                    <p className="text-[10px] uppercase tracking-tighter text-muted-foreground">
-                      Queries This Session
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <p className="font-newsreader text-xl font-bold text-primary">
-                      {artifacts.length}
-                    </p>
-                    <p className="text-[10px] uppercase tracking-tighter text-muted-foreground">
-                      Artifacts Created
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <p className="font-newsreader text-xl font-bold text-primary">
-                      {runtimeStats.totalTokens}
-                    </p>
-                    <p className="text-[10px] uppercase tracking-tighter text-muted-foreground">
-                      Total Tokens
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <p className="font-newsreader text-xl font-bold text-primary">
-                      {runtimeStats.contextUsage.total
-                        ? `${Math.round((runtimeStats.contextUsage.used / runtimeStats.contextUsage.total) * 100)}%`
-                        : "0%"}
-                    </p>
-                    <p className="text-[10px] uppercase tracking-tighter text-muted-foreground">
-                      Context Used
-                    </p>
-                  </div>
-                </div>
               </div>
             </aside>
             </>
@@ -1431,19 +1465,10 @@ export default function ActiveSessionPage() {
       </div>
 
       {/* Mobile bottom nav */}
-      <nav className="fixed bottom-0 left-0 z-50 flex w-full items-center justify-around rounded-t-[3rem] border-t border-outline-variant/30 bg-background px-6 pb-4 pt-2 shadow-[0_-4px_30px_rgba(26,28,26,0.05)] md:hidden">
-        <Link
-          to={commandRoute}
-          onClick={handleRouteLeave}
-          className="flex flex-col items-center justify-center p-3 text-muted-foreground"
-        >
-          <span className="material-symbols-outlined">terminal</span>
-          <span className="mt-1 font-label text-[10px] font-semibold">
-            Command
-          </span>
-        </Link>
+      <nav className="fixed bottom-0 left-0 z-50 flex w-full items-center justify-around rounded-t-[3rem] border-t border-border/30 bg-background px-6 pb-4 pt-2 shadow-[0_-4px_30px_rgba(26,28,26,0.05)] md:hidden">
         <Link
           to={`/session?id=${sessionId}`}
+          onClick={handleSessionHome}
           className="-translate-y-4 scale-110 rounded-full bg-primary p-4 text-background shadow-lg shadow-primary/20"
         >
           <span className="material-symbols-outlined">monitoring</span>
@@ -1463,29 +1488,17 @@ export default function ActiveSessionPage() {
   );
 }
 
-function RuntimeBadge({ label, value }) {
-  return (
-    <span className="rounded-full bg-surface px-3 py-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-      {label}: {value}
-    </span>
-  );
-}
-
-function RuntimeRow({ label, value }) {
-  return (
-    <div className="flex items-center justify-between gap-4 text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="text-right font-medium text-on-surface">{value}</span>
-    </div>
-  );
-}
-
 // ── Sub-components ───────────────────────────────────────
 
 function UserInputBanner({ req, onSubmit }) {
   const [answer, setAnswer] = useState("");
   const [submittingChoice, setSubmittingChoice] = useState(null);
   const { payload } = req;
+  const promptText =
+    payload.question ||
+    payload.message ||
+    payload.prompt ||
+    "The agent needs your input.";
 
   const submitAnswer = async (value) => {
     if (!value?.trim()) return;
@@ -1498,15 +1511,18 @@ function UserInputBanner({ req, onSubmit }) {
   };
 
   return (
-    <div className="rounded-[1.25rem] border border-amber-200 bg-amber-50 px-5 py-5 shadow-sm">
+    <div className="rounded-[1.25rem] border border-amber-300 bg-amber-50 px-5 py-5 shadow-sm">
       <div className="flex items-center justify-center gap-2 text-primary">
         <span className="material-symbols-outlined">help</span>
         <span className="font-label text-sm font-bold uppercase tracking-wide">
           Input Requested
         </span>
       </div>
-      <p className="mt-3 font-newsreader text-base text-center text-on-surface">
-        {payload.question || "The agent needs your input."}
+      <p className="mt-3 text-center text-xs font-semibold uppercase tracking-[0.16em] text-primary/70">
+        Reply to continue
+      </p>
+      <p className="mt-2 font-newsreader text-lg text-center text-foreground">
+        {promptText}
       </p>
       {payload.choices?.length > 0 && (
         <div className="mt-4 flex flex-wrap justify-center gap-2">
@@ -1515,7 +1531,7 @@ function UserInputBanner({ req, onSubmit }) {
               key={choice}
               onClick={() => submitAnswer(choice)}
               disabled={Boolean(submittingChoice)}
-              className="rounded-full border border-outline-variant bg-white px-4 py-2 text-sm transition-colors hover:bg-primary hover:text-on-primary disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-full border border-border bg-white px-4 py-2 text-sm transition-colors hover:bg-primary hover:text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
             >
               {submittingChoice === choice ? "Sending…" : choice}
             </button>
@@ -1535,12 +1551,12 @@ function UserInputBanner({ req, onSubmit }) {
             onChange={(e) => setAnswer(e.target.value)}
             placeholder="Type your answer…"
             disabled={Boolean(submittingChoice)}
-            className="flex-1 rounded-full border border-outline-variant bg-white px-4 py-2 text-sm focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex-1 rounded-full border border-border bg-white px-4 py-2 text-sm focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-60"
           />
           <button
             type="submit"
             disabled={!answer.trim() || Boolean(submittingChoice)}
-            className="rounded-full bg-primary px-4 py-2 text-sm font-bold text-on-primary disabled:opacity-40"
+            className="rounded-full bg-primary px-4 py-2 text-sm font-bold text-primary-foreground disabled:opacity-40"
           >
             {submittingChoice ? "Sending…" : "Submit"}
           </button>

@@ -37,7 +37,7 @@ export default memo(function SubagentCard({ block }) {
       <span className={cn("mt-1 h-2 w-2 shrink-0 rounded-full", style.dot)} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="font-medium text-on-surface">{agentName}</span>
+          <span className="font-medium text-foreground">{agentName}</span>
           <span className="text-xs text-muted-foreground">{style.label}</span>
         </div>
         {error && (

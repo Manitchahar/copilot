@@ -15,7 +15,7 @@ export default memo(function MCPStatusPanel({ mcpStatus }) {
             {mcpStatus.servers.map((name) => (
               <li
                 key={name}
-                className="flex items-center gap-2 text-xs text-on-surface"
+                className="flex items-center gap-2 text-xs text-foreground"
               >
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                 {name}

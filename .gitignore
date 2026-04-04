@@ -8,17 +8,15 @@
 !.github/**
 
 # Keep main project source/docs.
-!backend.py
+!api.py
+!engine.py
 !hello.py
 !config.yaml
-!research-report.md
+!README.md
 
 # Keep project scripts if needed for running/building.
 !scripts/
 !scripts/**
-
-# Keep optional project docs if added later.
-!README.md
 
 # Explicitly ignore local/sensitive/generated artifacts.
 .env
@@ -34,6 +32,9 @@ __pycache__/
 *.sqlite
 *.sqlite3
 *.zip
+.cloudcowork/
+.uploads/
+dist/
 
 # Ignore external vendored repository.
 open-interpreter/

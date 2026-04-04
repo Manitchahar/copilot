@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 from dataclasses import dataclass, field
 import json
 import os
@@ -406,6 +407,8 @@ class CopilotSessionController:
         self.sdk_session_id: str | None = None
         self._unsubscribe = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._sdk_loop: asyncio.AbstractEventLoop | None = None
+        self._sdk_thread: threading.Thread | None = None
         self._started = False
         self._closed = False
         self._busy = False
@@ -425,34 +428,20 @@ class CopilotSessionController:
         return self._busy
 
     @property
+    def has_pending_requests(self) -> bool:
+        return bool(self._pending_requests)
+
+    @property
+    def queued_prompt_count(self) -> int:
+        return len(self._queued_prompts)
+
+    @property
+    def subscriber_count(self) -> int:
+        return len(self._subscribers)
+
+    @property
     def session_id(self) -> str:
         return self.sdk_session_id or self._fallback_id
-
-    def _build_hooks(self) -> dict:
-        """Build session hooks for tool execution logging."""
-        return {
-            "pre_tool_use": self._hook_pre_tool,
-            "post_tool_use": self._hook_post_tool,
-            "error_occurred": self._hook_error,
-        }
-
-    def _hook_pre_tool(self, hook_input):
-        """Log tool execution start for telemetry."""
-        tool_name = str(hook_input.get("tool_name", "unknown") if isinstance(hook_input, dict) else getattr(hook_input, "tool_name", "unknown"))
-        self._emit_threadsafe("hook_pre_tool", {"tool_name": tool_name})
-        return {}
-
-    def _hook_post_tool(self, hook_input):
-        """Log tool execution end."""
-        tool_name = str(hook_input.get("tool_name", "unknown") if isinstance(hook_input, dict) else getattr(hook_input, "tool_name", "unknown"))
-        self._emit_threadsafe("hook_post_tool", {"tool_name": tool_name})
-        return {}
-
-    def _hook_error(self, hook_input):
-        """Log errors for debugging."""
-        error = str(hook_input.get("error", "unknown") if isinstance(hook_input, dict) else getattr(hook_input, "error", "unknown"))
-        self._emit_threadsafe("session_warning", {"message": f"Hook error: {error}"})
-        return {}
 
     def _build_session_kwargs(self) -> dict[str, object]:
         session_kwargs: dict[str, object] = {
@@ -468,7 +457,6 @@ class CopilotSessionController:
             session_kwargs["reasoning_effort"] = self.config.reasoning_effort
         if self.config.working_directory:
             session_kwargs["working_directory"] = self.config.working_directory
-        session_kwargs["hooks"] = self._build_hooks()
         if self.config.custom_agents:
             session_kwargs["custom_agents"] = [
                 CustomAgentConfig(**agent) for agent in self.config.custom_agents
@@ -506,22 +494,84 @@ class CopilotSessionController:
             "working_directory": self.config.working_directory or str(Path.cwd().resolve()),
         }
 
+    def _ensure_sdk_loop(self) -> None:
+        if self._sdk_loop and self._sdk_thread and self._sdk_thread.is_alive():
+            return
+
+        ready = threading.Event()
+
+        def runner():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self._sdk_loop = loop
+            ready.set()
+            loop.run_forever()
+            pending = asyncio.all_tasks(loop)
+            for task in pending:
+                task.cancel()
+            if pending:
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            loop.close()
+
+        self._sdk_thread = threading.Thread(
+            target=runner,
+            name=f"copilot-sdk-{self._fallback_id[:8]}",
+            daemon=True,
+        )
+        self._sdk_thread.start()
+        ready.wait()
+
+    async def _call_in_sdk_thread(self, fn, *args, **kwargs):
+        self._ensure_sdk_loop()
+        future: concurrent.futures.Future = concurrent.futures.Future()
+
+        def runner():
+            try:
+                future.set_result(fn(*args, **kwargs))
+            except Exception as exc:
+                future.set_exception(exc)
+
+        self._sdk_loop.call_soon_threadsafe(runner)
+        return await asyncio.wrap_future(future)
+
+    async def _run_sdk(self, fn, *args, **kwargs):
+        self._ensure_sdk_loop()
+        future: concurrent.futures.Future = concurrent.futures.Future()
+
+        def runner():
+            try:
+                task = self._sdk_loop.create_task(fn(*args, **kwargs))
+
+                def on_done(done_task):
+                    try:
+                        future.set_result(done_task.result())
+                    except Exception as exc:
+                        future.set_exception(exc)
+
+                task.add_done_callback(on_done)
+            except Exception as exc:
+                future.set_exception(exc)
+
+        self._sdk_loop.call_soon_threadsafe(runner)
+        return await asyncio.wrap_future(future)
+
     async def start(self, *, session_id: str | None = None, resume: bool = False) -> None:
         if self._started:
             return
 
         self._loop = asyncio.get_running_loop()
-        self.client = CopilotClient()
-        await self.client.start()
+        self._ensure_sdk_loop()
+        self.client = await self._call_in_sdk_thread(CopilotClient)
+        await self._run_sdk(self.client.start)
 
         session_kwargs = self._build_session_kwargs()
         if resume and session_id:
-            self.session = await self.client.resume_session(session_id, **session_kwargs)
+            self.session = await self._run_sdk(self.client.resume_session, session_id, **session_kwargs)
         else:
-            self.session = await self.client.create_session(session_id=session_id, **session_kwargs)
+            self.session = await self._run_sdk(self.client.create_session, session_id=session_id, **session_kwargs)
 
         self.sdk_session_id = getattr(self.session, "session_id", None) or session_id or self._fallback_id
-        self._unsubscribe = self.session.on(self._on_sdk_event)
+        self._unsubscribe = await self._call_in_sdk_thread(self.session.on, self._on_sdk_event)
         self._started = True
         self._emit_threadsafe(
             "session_started",
@@ -542,14 +592,20 @@ class CopilotSessionController:
             pending.event.set()
 
         if self._unsubscribe is not None:
-            self._unsubscribe()
+            await self._call_in_sdk_thread(self._unsubscribe)
             self._unsubscribe = None
         if self.session is not None:
-            await self.session.disconnect()
+            await self._run_sdk(self.session.disconnect)
             self.session = None
         if self.client is not None:
-            await self.client.stop()
+            await self._run_sdk(self.client.stop)
             self.client = None
+        if self._sdk_loop is not None:
+            self._sdk_loop.call_soon_threadsafe(self._sdk_loop.stop)
+        if self._sdk_thread is not None:
+            self._sdk_thread.join(timeout=2)
+        self._sdk_loop = None
+        self._sdk_thread = None
 
         await self._emit(
             "session_closed",
@@ -727,7 +783,7 @@ class CopilotSessionController:
             for attempt in range(1, attempts + 1):
                 self._turn_state.reset()
                 try:
-                    await self.session.send(prompt, attachments=sdk_attachments)
+                    await self._run_sdk(self.session.send, prompt, attachments=sdk_attachments)
                 except ExitRequested:
                     raise
                 except Exception as exc:
@@ -740,7 +796,7 @@ class CopilotSessionController:
                     )
                 except asyncio.TimeoutError:
                     try:
-                        messages = await self.session.get_messages()
+                        messages = await self._run_sdk(self.session.get_messages)
                         for event in reversed(messages):
                             if is_assistant_message(event):
                                 content = getattr(event.data, "content", None)
@@ -792,7 +848,7 @@ class CopilotSessionController:
         if not self.session or not self._busy:
             return False
         try:
-            await self.session.abort()
+            await self._run_sdk(self.session.abort)
         except Exception:
             pass
         self._busy = False
@@ -829,7 +885,7 @@ class CopilotSessionController:
         if not self.session:
             return []
         try:
-            messages = await self.session.get_messages()
+            messages = await self._run_sdk(self.session.get_messages)
         except Exception:
             return []
         result = []
@@ -1034,7 +1090,10 @@ class CopilotSessionController:
             self._emit_threadsafe("session_error", {"message": message})
 
     def _handle_session_idle(self, event_name, data):
-        self._turn_state.idle.set()
+        if self._loop is not None:
+            self._loop.call_soon_threadsafe(self._turn_state.idle.set)
+        else:
+            self._turn_state.idle.set()
 
     def _handle_elicitation(self, event_name, data):
         message = normalize_text(getattr(data, "message", None))
@@ -1060,7 +1119,11 @@ class CopilotSessionController:
         if not self.config.show_tool_events:
             return
         tool_call_id = normalize_text(getattr(data, "tool_call_id", None))
-        partial_output = normalize_text(getattr(data, "partial_output", None))
+        partial_output = normalize_text(
+            getattr(data, "partial_output", None)
+            or getattr(data, "content", None)
+            or getattr(data, "output", None)
+        )
         if partial_output:
             self._emit_threadsafe(
                 "tool_output",
@@ -1075,7 +1138,11 @@ class CopilotSessionController:
         if not self.config.show_tool_events:
             return
         tool_call_id = normalize_text(getattr(data, "tool_call_id", None))
-        progress = normalize_text(getattr(data, "progress_message", None))
+        progress = normalize_text(
+            getattr(data, "progress_message", None)
+            or getattr(data, "message", None)
+            or getattr(data, "content", None)
+        )
         if progress:
             self._emit_threadsafe(
                 "tool_progress",
@@ -1157,11 +1224,6 @@ class CopilotSessionController:
         if mode:
             self._emit_threadsafe("mode_changed", {"mode": mode})
 
-    def _handle_session_warning(self, event_name, data):
-        message = normalize_text(getattr(data, "message", None))
-        if message:
-            self._emit_threadsafe("session_warning", {"message": message})
-
     def _handle_session_info(self, event_name, data):
         message = normalize_text(getattr(data, "message", None))
         if message:
@@ -1228,9 +1290,12 @@ class CopilotSessionController:
         "session_idle": _handle_session_idle,
         "elicitation_requested": _handle_elicitation,
         "tool_execution_start": _handle_tool_start,
+        "tool_execution_started": _handle_tool_start,
         "tool_execution_partial_result": _handle_tool_partial,
+        "tool_execution_output": _handle_tool_partial,
         "tool_execution_progress": _handle_tool_progress,
         "tool_execution_complete": _handle_tool_complete,
+        "tool_execution_completed": _handle_tool_complete,
         # New — assistant events
         "assistant_intent": _handle_assistant_intent,
         "assistant_usage": _handle_assistant_usage,
@@ -1242,7 +1307,6 @@ class CopilotSessionController:
         "session_title_changed": _handle_title_changed,
         "session_context_changed": _handle_context_changed,
         "session_mode_changed": _handle_mode_changed,
-        "session_warning": _handle_session_warning,
         "session_info": _handle_session_info,
         "session_start": _handle_session_start,
         # New — subagent events

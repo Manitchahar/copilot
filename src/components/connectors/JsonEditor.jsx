@@ -19,7 +19,7 @@ export default function JsonEditor({ value, onChange, error }) {
         value={value}
         onChange={(e) => onChange(e.target.value)}
         spellCheck={false}
-        className="min-h-[200px] bg-[#1e1e1e] p-4 font-mono leading-relaxed text-[#d4d4d4] border-transparent resize-y"
+        className="min-h-[200px] bg-code p-4 font-mono leading-relaxed text-code-foreground border-transparent resize-y"
       />
       <Button variant="ghost" size="xs" onClick={handleCopy} className="absolute right-2 top-2 bg-white/10 text-white/60 hover:bg-white/20 hover:text-white/80">
         {copied ? "Copied!" : "Copy"}
